@@ -247,12 +247,28 @@ function doPost(e) {
         sheetH.getRange(2, 1, rowsH.length, rowsH[0].length).setValues(rowsH);
       }
 
+      // Simpan Pengaturan Toko jika disertakan
+      if (data.settings) {
+        saveSettingsToSheet(ss, data.settings);
+      }
+
       return ContentService.createTextOutput(JSON.stringify({ 
         success: true, 
         message: "Sinkronisasi penuh ke Spreadsheet berhasil!",
         totalPelanggan: data.customers ? data.customers.length : 0,
         totalTransaksi: data.transactions ? data.transactions.length : 0,
         totalHadiah: data.redemptions ? data.redemptions.length : 0
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 5. Simpan Pengaturan & Identitas Toko
+    if (action === "save_settings") {
+      if (data.settings) {
+        saveSettingsToSheet(ss, data.settings);
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        action: action
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -285,14 +301,49 @@ function updateCustomerBalance(ss, customerId, newBalance) {
   }
 }
 
+function saveSettingsToSheet(ss, s) {
+  var sheetS = ss.getSheetByName("Pengaturan");
+  if (!sheetS) {
+    sheetS = ss.insertSheet("Pengaturan");
+  }
+  sheetS.clear();
+  var rows = [
+    ["Key", "Value"],
+    ["storeName", s.storeName || ""],
+    ["storeTagline", s.storeTagline || ""],
+    ["storeAddress", s.storeAddress || ""],
+    ["storePhone", s.storePhone || ""],
+    ["stampThreshold", s.stampThreshold || 20000],
+    ["rewardRequiredStamps", s.rewardRequiredStamps || 25],
+    ["defaultRewardName", s.defaultRewardName || ""],
+    ["adminPin", s.adminPin || "1234"]
+  ];
+  sheetS.getRange(1, 1, rows.length, 2).setValues(rows);
+  sheetS.getRange(1, 1, 1, 2).setBackground("#475569").setFontColor("#ffffff").setFontWeight("bold");
+}
+
 function getAllDataFromSheets(ss) {
   var result = {
     success: true,
     customers: [],
     transactions: [],
     redemptions: [],
+    settings: null,
     timestamp: new Date().toISOString()
   };
+
+  // 0. Baca Sheet Pengaturan jika ada
+  var sheetS = ss.getSheetByName("Pengaturan");
+  if (sheetS && sheetS.getLastRow() > 1) {
+    var rowsS = sheetS.getRange(2, 1, sheetS.getLastRow() - 1, 2).getValues();
+    var cfg = {};
+    for (var m = 0; m < rowsS.length; m++) {
+      var key = String(rowsS[m][0] || "").trim();
+      var val = rowsS[m][1];
+      if (key) cfg[key] = val;
+    }
+    result.settings = cfg;
+  }
 
   // 1. Baca Sheet Pelanggan
   var sheetC = ss.getSheetByName("Pelanggan");
@@ -473,8 +524,13 @@ export async function syncAllToGoogleSheets(
     })),
     settings: {
       storeName: settings.storeName,
+      storeTagline: settings.storeTagline,
+      storeAddress: settings.storeAddress,
+      storePhone: settings.storePhone,
       stampThreshold: settings.stampThreshold,
+      rewardRequiredStamps: settings.rewardRequiredStamps,
       defaultRewardName: settings.defaultRewardName,
+      adminPin: settings.adminPin,
     },
   };
 
@@ -553,11 +609,36 @@ export function sendRedemptionToGoogleSheets(
   });
 }
 
+/**
+ * Sends store settings / identity to Google Sheets in the background
+ */
+export function sendSettingsToGoogleSheets(
+  scriptUrl: string | undefined,
+  settings: StoreSettings
+): void {
+  if (!scriptUrl) return;
+
+  postToGoogleSheets(scriptUrl, {
+    action: 'save_settings',
+    settings: {
+      storeName: settings.storeName,
+      storeTagline: settings.storeTagline,
+      storeAddress: settings.storeAddress,
+      storePhone: settings.storePhone,
+      stampThreshold: settings.stampThreshold,
+      rewardRequiredStamps: settings.rewardRequiredStamps,
+      defaultRewardName: settings.defaultRewardName,
+      adminPin: settings.adminPin,
+    },
+  });
+}
+
 export interface PulledSheetsData {
   customers: Customer[];
   transactions: Transaction[];
   ledgers: StampLedger[];
   redemptions: Redemption[];
+  settings?: Partial<StoreSettings>;
 }
 
 /**
@@ -730,6 +811,19 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
         });
     });
 
+    let pulledSettings: Partial<StoreSettings> | undefined = undefined;
+    if (json.settings && typeof json.settings === 'object') {
+      pulledSettings = {};
+      if (json.settings.storeName) pulledSettings.storeName = String(json.settings.storeName);
+      if (json.settings.storeTagline) pulledSettings.storeTagline = String(json.settings.storeTagline);
+      if (json.settings.storeAddress) pulledSettings.storeAddress = String(json.settings.storeAddress);
+      if (json.settings.storePhone) pulledSettings.storePhone = String(json.settings.storePhone);
+      if (json.settings.stampThreshold) pulledSettings.stampThreshold = Number(json.settings.stampThreshold) || 20000;
+      if (json.settings.rewardRequiredStamps) pulledSettings.rewardRequiredStamps = Number(json.settings.rewardRequiredStamps) || 25;
+      if (json.settings.defaultRewardName) pulledSettings.defaultRewardName = String(json.settings.defaultRewardName);
+      if (json.settings.adminPin) pulledSettings.adminPin = String(json.settings.adminPin);
+    }
+
     return {
       success: true,
       data: {
@@ -737,6 +831,7 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
         transactions,
         ledgers,
         redemptions,
+        settings: pulledSettings,
       },
       message: `Berhasil menarik ${customers.length} pelanggan dan ${transactions.length} transaksi dari Spreadsheet!`,
     };

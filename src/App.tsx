@@ -43,6 +43,7 @@ import {
   sendTransactionToGoogleSheets,
   sendCustomerToGoogleSheets,
   sendRedemptionToGoogleSheets,
+  sendSettingsToGoogleSheets,
   fetchDataFromGoogleSheets,
 } from './utils/googleSheets';
 
@@ -306,16 +307,30 @@ export default function App() {
               });
           });
 
+          const mergedSettings: StoreSettings = {
+            ...prev.settings,
+            ...(pulled.settings || {}),
+            googleSheetsLastSync: new Date().toISOString(),
+          };
+
+          const updatedRewards = prev.rewards.map((rew, idx) =>
+            idx === 0
+              ? {
+                  ...rew,
+                  name: mergedSettings.defaultRewardName || rew.name,
+                  requiredStamps: mergedSettings.rewardRequiredStamps || rew.requiredStamps,
+                }
+              : rew
+          );
+
           const next = {
             ...prev,
             customers: mergedCustomers,
             transactions: mergedTransactions,
             ledgers: rebuiltLedgers,
             redemptions: mergedRedemptions,
-            settings: {
-              ...prev.settings,
-              googleSheetsLastSync: new Date().toISOString(),
-            },
+            rewards: updatedRewards,
+            settings: mergedSettings,
           };
           saveAppData(next);
           return next;
@@ -529,10 +544,23 @@ export default function App() {
   // Settings & Categories
   const handleSaveSettings = (newSettings: StoreSettings) => {
     setData(prev => {
-      const next = { ...prev, settings: newSettings };
+      const updatedRewards = prev.rewards.map((rew, idx) =>
+        idx === 0
+          ? {
+              ...rew,
+              name: newSettings.defaultRewardName || rew.name,
+              requiredStamps: newSettings.rewardRequiredStamps || rew.requiredStamps,
+            }
+          : rew
+      );
+      const next = { ...prev, settings: newSettings, rewards: updatedRewards };
       saveAppData(next);
       return next;
     });
+
+    if (newSettings.googleSheetsScriptUrl) {
+      sendSettingsToGoogleSheets(newSettings.googleSheetsScriptUrl, newSettings);
+    }
   };
 
   const handleSaveCategories = (newCategories: TransactionCategory[]) => {

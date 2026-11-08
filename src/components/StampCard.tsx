@@ -133,7 +133,7 @@ export const StampCard: React.FC<StampCardProps> = ({
               {customer.customerCode} · {customer.name}
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              Tunjukkan QR Code ini kepada kasir SCS Fotocopy saat bertransaksi.
+              Tunjukkan QR Code ini kepada kasir {settings.storeName} saat bertransaksi.
             </p>
 
             <div className="mt-5 flex items-center justify-center gap-2">

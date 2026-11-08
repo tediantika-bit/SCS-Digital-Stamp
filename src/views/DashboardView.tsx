@@ -68,13 +68,13 @@ export const DashboardView: React.FC<Props> = ({
           <div>
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 backdrop-blur-xs text-xs font-semibold text-orange-100 mb-2">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>SCS Fotocopy Loyalty System</span>
+              <span>{settings.storeName} Loyalty System</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              Dashboard Loyalitas SCS
+              Dashboard Loyalitas {settings.storeName}
             </h1>
             <p className="text-xs sm:text-sm text-orange-100 mt-1 max-w-xl">
-              Kelola kartu stempel digital, catat transaksi kasir, dan berikan hadiah minyak goreng 500ml per 25 stempel.
+              Kelola kartu stempel digital, catat transaksi kasir, dan berikan hadiah {settings.defaultRewardName} per {settings.rewardRequiredStamps || 25} stempel.
             </p>
           </div>
 
@@ -175,7 +175,7 @@ export const DashboardView: React.FC<Props> = ({
             </div>
           </div>
           <p className="text-2xl font-black text-slate-800 tabular-nums">{totalRewardsRedeemed}</p>
-          <span className="text-[11px] text-slate-500 mt-1 block">Minyak goreng 500ml</span>
+          <span className="text-[11px] text-slate-500 mt-1 block truncate">{settings.defaultRewardName}</span>
         </div>
       </div>
 

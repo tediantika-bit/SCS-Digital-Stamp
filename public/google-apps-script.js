@@ -242,9 +242,25 @@ function doPost(e) {
         sheetH.getRange(2, 1, rowsH.length, rowsH[0].length).setValues(rowsH);
       }
 
+      // Simpan Pengaturan Toko jika disertakan
+      if (data.settings) {
+        saveSettingsToSheet(ss, data.settings);
+      }
+
       return ContentService.createTextOutput(JSON.stringify({ 
         success: true, 
         message: "Sinkronisasi penuh ke Spreadsheet berhasil!"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 5. Simpan Pengaturan & Identitas Toko
+    if (action === "save_settings") {
+      if (data.settings) {
+        saveSettingsToSheet(ss, data.settings);
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        action: action
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -277,14 +293,49 @@ function updateCustomerBalance(ss, customerId, newBalance) {
   }
 }
 
+function saveSettingsToSheet(ss, s) {
+  var sheetS = ss.getSheetByName("Pengaturan");
+  if (!sheetS) {
+    sheetS = ss.insertSheet("Pengaturan");
+  }
+  sheetS.clear();
+  var rows = [
+    ["Key", "Value"],
+    ["storeName", s.storeName || ""],
+    ["storeTagline", s.storeTagline || ""],
+    ["storeAddress", s.storeAddress || ""],
+    ["storePhone", s.storePhone || ""],
+    ["stampThreshold", s.stampThreshold || 20000],
+    ["rewardRequiredStamps", s.rewardRequiredStamps || 25],
+    ["defaultRewardName", s.defaultRewardName || ""],
+    ["adminPin", s.adminPin || "1234"]
+  ];
+  sheetS.getRange(1, 1, rows.length, 2).setValues(rows);
+  sheetS.getRange(1, 1, 1, 2).setBackground("#475569").setFontColor("#ffffff").setFontWeight("bold");
+}
+
 function getAllDataFromSheets(ss) {
   var result = {
     success: true,
     customers: [],
     transactions: [],
     redemptions: [],
+    settings: null,
     timestamp: new Date().toISOString()
   };
+
+  // 0. Baca Sheet Pengaturan jika ada
+  var sheetS = ss.getSheetByName("Pengaturan");
+  if (sheetS && sheetS.getLastRow() > 1) {
+    var rowsS = sheetS.getRange(2, 1, sheetS.getLastRow() - 1, 2).getValues();
+    var cfg = {};
+    for (var m = 0; m < rowsS.length; m++) {
+      var key = String(rowsS[m][0] || "").trim();
+      var val = rowsS[m][1];
+      if (key) cfg[key] = val;
+    }
+    result.settings = cfg;
+  }
 
   // 1. Baca Sheet Pelanggan
   var sheetC = ss.getSheetByName("Pelanggan");

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Settings,
   Store,
@@ -55,6 +55,13 @@ export const SettingsView: React.FC<Props> = ({
   const [formData, setFormData] = useState<StoreSettings>({ ...settings });
   const [savedMessage, setSavedMessage] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+
+  useEffect(() => {
+    setFormData(prev => ({
+      ...prev,
+      ...settings,
+    }));
+  }, [settings]);
 
   // Google Sheets state
   const [showScriptModal, setShowScriptModal] = useState(false);

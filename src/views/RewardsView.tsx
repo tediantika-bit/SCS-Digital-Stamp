@@ -22,10 +22,10 @@ export const RewardsView: React.FC<Props> = ({
   settings,
   onRedeemReward,
 }) => {
-  const defaultReward = rewards[0] || {
-    name: 'Minyak goreng 500 ml',
-    requiredStamps: 25,
-    description: 'Hadiah utama per 25 stempel',
+  const defaultReward = {
+    name: settings.defaultRewardName || rewards[0]?.name || 'Minyak goreng 500 ml',
+    requiredStamps: settings.rewardRequiredStamps || rewards[0]?.requiredStamps || 25,
+    description: `Hadiah utama per ${settings.rewardRequiredStamps || 25} stempel`,
   };
 
   const eligibleCustomers = customers
@@ -48,7 +48,7 @@ export const RewardsView: React.FC<Props> = ({
           <span>Penukaran & Pengelolaan Hadiah</span>
         </h2>
         <p className="text-xs text-slate-500 mt-0.5">
-          Kelola klaim hadiah loyalitas untuk pelanggan yang telah mengumpulkan minimal 25 stempel
+          Kelola klaim hadiah loyalitas untuk pelanggan yang telah mengumpulkan minimal {defaultReward.requiredStamps} stempel
         </p>
       </div>
 
@@ -66,7 +66,7 @@ export const RewardsView: React.FC<Props> = ({
               {defaultReward.name}
             </h3>
             <p className="text-xs text-amber-100 mt-1 max-w-lg">
-              Setiap 25 stempel dapat ditukarkan dengan 1 botol minyak goreng 500 ml. Saldo sisa tetap dibawa ke periode kartu berikutnya.
+              Setiap {defaultReward.requiredStamps} stempel dapat ditukarkan dengan {defaultReward.name}. Stempel sisa tetap dibawa ke periode kartu berikutnya.
             </p>
           </div>
         </div>

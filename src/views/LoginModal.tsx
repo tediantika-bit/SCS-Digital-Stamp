@@ -35,7 +35,7 @@ export const LoginModal: React.FC<Props> = ({
             SCS
           </div>
           <h2 className="text-lg font-black text-slate-900 tracking-tight">
-            Masuk Admin SCS Fotocopy
+            Masuk Admin {settings.storeName}
           </h2>
           <p className="text-xs text-slate-500 mt-1">
             Masukkan PIN Kasir untuk mengelola stempel & pelanggan

@@ -77,7 +77,7 @@ export const ReportsView: React.FC<Props> = ({
             <span>Laporan & Statistik Loyalitas</span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Ringkasan omzet transaksi, stempel diterbitkan, dan penukaran hadiah SCS Fotocopy
+            Ringkasan omzet transaksi, stempel diterbitkan, dan penukaran hadiah {settings.storeName}
           </p>
         </div>
 

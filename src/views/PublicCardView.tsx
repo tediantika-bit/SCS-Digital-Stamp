@@ -96,7 +96,7 @@ export const PublicCardView: React.FC<Props> = ({
             <div>
               <p className="font-extrabold text-sm leading-tight">SELAMAT! Hadiah Siap Ditukarkan</p>
               <p className="text-xs text-emerald-100 mt-0.5">
-                Tunjukkan kartu ini kepada kasir SCS Fotocopy untuk klaim <strong>{settings.defaultRewardName}</strong>!
+                Tunjukkan kartu ini kepada kasir {settings.storeName} untuk klaim <strong>{settings.defaultRewardName}</strong>!
               </p>
             </div>
           </div>

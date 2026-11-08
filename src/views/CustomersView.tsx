@@ -78,7 +78,7 @@ export const CustomersView: React.FC<Props> = ({
             Manajemen Pelanggan
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Daftar pelanggan kartu stempel SCS Fotocopy dan status saldo
+            Daftar pelanggan kartu stempel {settings.storeName} dan status stempel
           </p>
         </div>
 

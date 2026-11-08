@@ -45,9 +45,10 @@ export const CustomerModal: React.FC<Props> = ({
       });
     } else {
       const codeNum = String(existingCount + 1).padStart(3, '0');
+      const customerCode = `SCS-${codeNum}`;
       const newCustomer: Customer = {
-        id: `cust-${Date.now()}`,
-        customerCode: `SCS-${codeNum}`,
+        id: customerCode,
+        customerCode: customerCode,
         name: name.trim(),
         phone: phone.trim() || undefined,
         notes: notes.trim() || undefined,

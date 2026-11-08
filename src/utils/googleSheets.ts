@@ -600,59 +600,87 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
       };
     }
 
-    const customers: Customer[] = (json.customers || []).map((c: any) => ({
-      id: c.id || c.customerCode,
-      customerCode: c.customerCode || c.id,
-      name: c.name || 'Pelanggan',
-      phone: c.phone || '',
-      qrToken: c.cardUrl && c.cardUrl.includes('#card=') ? c.cardUrl.split('#card=')[1] : c.id,
-      status: 'active',
-      createdAt: c.createdAt || new Date().toISOString(),
-    }));
-
-    const transactions: Transaction[] = (json.transactions || []).map((t: any) => ({
-      id: t.id || `trx-${t.transactionCode}`,
-      transactionCode: t.transactionCode,
-      customerId: t.customerId,
-      customerName: t.customerName,
-      categoryId: t.categoryId || 'cat-general',
-      categoryName: t.categoryName || 'Transaksi Toko',
-      amount: Number(t.amount) || 0,
-      stampEarned: Number(t.stampEarned) || 0,
-      status: t.status || 'confirmed',
-      description: t.description || 'Transaksi Toko',
-      createdBy: 'Kasir SCS',
-      createdAt: t.createdAt || new Date().toISOString(),
-    }));
-
-    const redemptions: Redemption[] = (json.redemptions || []).map((r: any) => ({
-      id: r.id || `rdm-${r.redemptionCode}`,
-      redemptionCode: r.redemptionCode,
-      customerId: r.customerId,
-      customerName: r.customerName,
-      rewardId: r.rewardId || 'rew-1',
-      rewardName: r.rewardName || 'Minyak goreng 500 ml',
-      stampsUsed: Number(r.stampsUsed) || 25,
-      redeemedAt: r.redeemedAt || new Date().toISOString(),
-      notes: r.notes || '',
-      status: 'completed',
-    }));
-
-    // Reconstruct ledger entries
-    const ledgers: StampLedger[] = [];
-    transactions.forEach(t => {
-      ledgers.push({
-        id: `ldg-${t.transactionCode}`,
-        customerId: t.customerId,
-        transactionId: t.id,
-        type: 'earn',
-        amount: t.stampEarned,
-        balanceAfter: 0,
-        description: `Stempel transaksi ${t.transactionCode}`,
-        createdBy: 'Kasir SCS',
-        createdAt: t.createdAt,
-      });
+    const rawCustomers: any[] = json.customers || [];
+    const customers: Customer[] = rawCustomers.map((c: any) => {
+      const code = String(c.customerCode || c.id || '').trim();
+      return {
+        id: code,
+        customerCode: code,
+        name: String(c.name || 'Pelanggan').trim(),
+        phone: c.phone && c.phone !== '-' ? String(c.phone).trim() : '',
+        qrToken: c.cardUrl && c.cardUrl.includes('#card=') ? c.cardUrl.split('#card=')[1] : code,
+        status: 'active',
+        createdAt: c.createdAt || new Date().toISOString(),
+      };
     });
+
+    // Helper to resolve canonical customer ID (matches by id/customerCode or exact name)
+    const resolveCustomerId = (rawId: string, rawName: string): string => {
+      const byId = customers.find(
+        c => c.id.toLowerCase() === String(rawId || '').trim().toLowerCase() ||
+             c.customerCode.toLowerCase() === String(rawId || '').trim().toLowerCase()
+      );
+      if (byId) return byId.id;
+
+      const byName = customers.find(
+        c => c.name.toLowerCase() === String(rawName || '').trim().toLowerCase()
+      );
+      if (byName) return byName.id;
+
+      return String(rawId || '').trim();
+    };
+
+    const transactions: Transaction[] = (json.transactions || []).map((t: any) => {
+      const resolvedCustId = resolveCustomerId(t.customerId, t.customerName);
+      return {
+        id: t.id || `trx-${t.transactionCode}`,
+        transactionCode: t.transactionCode,
+        customerId: resolvedCustId,
+        customerName: t.customerName,
+        categoryId: t.categoryId || 'cat-general',
+        categoryName: t.categoryName || 'Transaksi Toko',
+        amount: Number(t.amount) || 0,
+        stampEarned: Number(t.stampEarned) || 0,
+        status: t.status || 'confirmed',
+        description: t.description || 'Transaksi Toko',
+        createdBy: 'Kasir SCS',
+        createdAt: t.createdAt || new Date().toISOString(),
+      };
+    });
+
+    const redemptions: Redemption[] = (json.redemptions || []).map((r: any) => {
+      const resolvedCustId = resolveCustomerId(r.customerId, r.customerName);
+      return {
+        id: r.id || `rdm-${r.redemptionCode}`,
+        redemptionCode: r.redemptionCode,
+        customerId: resolvedCustId,
+        customerName: r.customerName,
+        rewardId: r.rewardId || 'rew-1',
+        rewardName: r.rewardName || 'Minyak goreng 500 ml',
+        stampsUsed: Number(r.stampsUsed) || 25,
+        redeemedAt: r.redeemedAt || new Date().toISOString(),
+        notes: r.notes || '',
+        status: 'completed',
+      };
+    });
+
+    // Reconstruct ledger entries with running balance
+    const ledgers: StampLedger[] = [];
+    transactions
+      .filter(t => t.status !== 'cancelled')
+      .forEach(t => {
+        ledgers.push({
+          id: `ldg-${t.transactionCode}`,
+          customerId: t.customerId,
+          transactionId: t.id,
+          type: 'earn',
+          amount: t.stampEarned,
+          balanceAfter: 0,
+          description: `Stempel transaksi ${t.transactionCode}`,
+          createdBy: 'Kasir SCS',
+          createdAt: t.createdAt,
+        });
+      });
 
     redemptions.forEach(r => {
       ledgers.push({
@@ -665,6 +693,41 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
         createdBy: 'Admin SCS',
         createdAt: r.redeemedAt,
       });
+    });
+
+    // Ensure if Sheet Pelanggan has a positive balance not yet reflected in reconstructed ledgers, sync the difference
+    rawCustomers.forEach((rawC: any) => {
+      const code = String(rawC.customerCode || rawC.id || '').trim();
+      const sheetBalance = Number(rawC.balance) || 0;
+      const calcBalance = ledgers
+        .filter(l => l.customerId === code)
+        .reduce((sum, l) => sum + l.amount, 0);
+
+      if (sheetBalance > calcBalance) {
+        const diff = sheetBalance - calcBalance;
+        ledgers.push({
+          id: `ldg-sync-${code}`,
+          customerId: code,
+          type: 'earn',
+          amount: diff,
+          balanceAfter: sheetBalance,
+          description: 'Saldo stempel tersinkronisasi dari Google Spreadsheet',
+          createdBy: 'Sistem Sync',
+          createdAt: rawC.createdAt || new Date().toISOString(),
+        });
+      }
+    });
+
+    // Compute chronological balanceAfter per customer
+    customers.forEach(c => {
+      let running = 0;
+      ledgers
+        .filter(l => l.customerId === c.id)
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        .forEach(l => {
+          running += l.amount;
+          l.balanceAfter = running;
+        });
     });
 
     return {

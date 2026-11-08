@@ -112,14 +112,75 @@ export function loadAppData(): AppData {
       }
     }
 
+    const parsedCustomers: Customer[] = rawCustomers ? JSON.parse(rawCustomers) : DEFAULT_CUSTOMERS;
+    const parsedTransactions: Transaction[] = rawTransactions ? JSON.parse(rawTransactions) : DEFAULT_TRANSACTIONS;
+    const parsedLedgers: StampLedger[] = rawLedgers ? JSON.parse(rawLedgers) : DEFAULT_LEDGERS;
+    const parsedRedemptions: Redemption[] = rawRedemptions ? JSON.parse(rawRedemptions) : DEFAULT_REDEMPTIONS;
+
+    // Normalize customer IDs to customerCode so local storage & Google Sheets IDs always match
+    const idMap: Record<string, string> = {};
+    const nameMap: Record<string, string> = {};
+
+    const normalizedCustomers = parsedCustomers.map(c => {
+      const canonicalId = c.customerCode || c.id;
+      idMap[c.id] = canonicalId;
+      idMap[c.customerCode] = canonicalId;
+      if (c.name) nameMap[c.name.toLowerCase().trim()] = canonicalId;
+      return {
+        ...c,
+        id: canonicalId,
+        customerCode: canonicalId,
+      };
+    });
+
+    const normalizedTransactions = parsedTransactions.map(t => {
+      const mappedId = idMap[t.customerId] || (t.customerName ? nameMap[t.customerName.toLowerCase().trim()] : undefined) || t.customerId;
+      return {
+        ...t,
+        customerId: mappedId,
+      };
+    });
+
+    let normalizedLedgers = parsedLedgers.map(l => ({
+      ...l,
+      customerId: idMap[l.customerId] || l.customerId,
+    }));
+
+    // Ensure every confirmed transaction has a corresponding earn ledger entry
+    normalizedTransactions.forEach(t => {
+      if (t.status === 'confirmed' && t.stampEarned > 0) {
+        const hasLedger = normalizedLedgers.some(
+          l => l.transactionId === t.id || l.id === `ldg-${t.transactionCode}`
+        );
+        if (!hasLedger) {
+          normalizedLedgers.push({
+            id: `ldg-${t.transactionCode}`,
+            customerId: t.customerId,
+            transactionId: t.id,
+            type: 'earn',
+            amount: t.stampEarned,
+            balanceAfter: 0,
+            description: `Stempel transaksi ${t.transactionCode}`,
+            createdBy: t.createdBy || 'Admin SCS',
+            createdAt: t.createdAt,
+          });
+        }
+      }
+    });
+
+    const normalizedRedemptions = parsedRedemptions.map(r => ({
+      ...r,
+      customerId: idMap[r.customerId] || (r.customerName ? nameMap[r.customerName.toLowerCase().trim()] : undefined) || r.customerId,
+    }));
+
     return {
       settings,
       categories: rawCategories ? JSON.parse(rawCategories) : DEFAULT_CATEGORIES,
-      customers: rawCustomers ? JSON.parse(rawCustomers) : DEFAULT_CUSTOMERS,
-      transactions: rawTransactions ? JSON.parse(rawTransactions) : DEFAULT_TRANSACTIONS,
-      ledgers: rawLedgers ? JSON.parse(rawLedgers) : DEFAULT_LEDGERS,
+      customers: normalizedCustomers,
+      transactions: normalizedTransactions,
+      ledgers: normalizedLedgers,
       rewards: rawRewards ? JSON.parse(rawRewards) : DEFAULT_REWARDS,
-      redemptions: rawRedemptions ? JSON.parse(rawRedemptions) : DEFAULT_REDEMPTIONS,
+      redemptions: normalizedRedemptions,
     };
   } catch (err) {
     console.error('Failed to parse stored app data:', err);
@@ -170,9 +231,18 @@ export function calculateStampsFromAmount(amount: number, threshold: number = 20
   return Math.floor(amount / threshold);
 }
 
-export function getCustomerStampBalance(customerId: string, ledgers: StampLedger[]): number {
+export function getCustomerStampBalance(
+  customerId: string,
+  ledgers: StampLedger[],
+  customerCode?: string,
+  customerName?: string
+): number {
   return ledgers
-    .filter(l => l.customerId === customerId)
+    .filter(l => {
+      if (l.customerId === customerId) return true;
+      if (customerCode && l.customerId === customerCode) return true;
+      return false;
+    })
     .reduce((sum, item) => sum + item.amount, 0);
 }
 

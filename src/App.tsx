@@ -158,13 +158,160 @@ export default function App() {
     try {
       const res = await fetchDataFromGoogleSheets(url);
       if (res.success && res.data) {
+        const pulled = res.data;
         setData(prev => {
+          // If remote sheets returned completely empty while local has data, keep local data safe
+          if (
+            pulled.customers.length === 0 &&
+            pulled.transactions.length === 0 &&
+            (prev.customers.length > 0 || prev.transactions.length > 0)
+          ) {
+            return prev;
+          }
+
+          // Merge customers by customerCode / id (remote + local unsynced)
+          const customerMap = new Map<string, Customer>();
+          prev.customers.forEach(c => {
+            const key = c.customerCode || c.id;
+            customerMap.set(key, { ...c, id: key, customerCode: key });
+          });
+          pulled.customers.forEach(c => {
+            const key = c.customerCode || c.id;
+            const existing = customerMap.get(key);
+            customerMap.set(key, {
+              ...existing,
+              ...c,
+              id: key,
+              customerCode: key,
+              qrToken: c.qrToken && c.qrToken !== key ? c.qrToken : existing?.qrToken || c.qrToken,
+            });
+          });
+          const mergedCustomers = Array.from(customerMap.values());
+
+          // Helper to map any customerId to canonical customerCode
+          const resolveCustId = (rawId: string, rawName?: string): string => {
+            const foundById = mergedCustomers.find(
+              c => c.id === rawId || c.customerCode === rawId
+            );
+            if (foundById) return foundById.id;
+            if (rawName) {
+              const foundByName = mergedCustomers.find(
+                c => c.name.toLowerCase().trim() === rawName.toLowerCase().trim()
+              );
+              if (foundByName) return foundByName.id;
+            }
+            return rawId;
+          };
+
+          // Merge transactions by transactionCode
+          const trxMap = new Map<string, Transaction>();
+          prev.transactions.forEach(t => {
+            const cid = resolveCustId(t.customerId, t.customerName);
+            trxMap.set(t.transactionCode, { ...t, customerId: cid });
+          });
+          pulled.transactions.forEach(t => {
+            const cid = resolveCustId(t.customerId, t.customerName);
+            const existing = trxMap.get(t.transactionCode);
+            trxMap.set(t.transactionCode, {
+              ...existing,
+              ...t,
+              id: existing?.id || t.id,
+              customerId: cid,
+            });
+          });
+          const mergedTransactions = Array.from(trxMap.values()).sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+
+          // Merge redemptions by redemptionCode
+          const rdmMap = new Map<string, Redemption>();
+          prev.redemptions.forEach(r => {
+            const cid = resolveCustId(r.customerId, r.customerName);
+            rdmMap.set(r.redemptionCode, { ...r, customerId: cid });
+          });
+          pulled.redemptions.forEach(r => {
+            const cid = resolveCustId(r.customerId, r.customerName);
+            const existing = rdmMap.get(r.redemptionCode);
+            rdmMap.set(r.redemptionCode, {
+              ...existing,
+              ...r,
+              id: existing?.id || r.id,
+              customerId: cid,
+            });
+          });
+          const mergedRedemptions = Array.from(rdmMap.values()).sort(
+            (a, b) => new Date(b.redeemedAt).getTime() - new Date(a.redeemedAt).getTime()
+          );
+
+          // Rebuild complete & accurate ledgers from all confirmed transactions & redemptions
+          const rebuiltLedgers: StampLedger[] = [];
+          mergedTransactions
+            .filter(t => t.status !== 'cancelled' && t.stampEarned > 0)
+            .forEach(t => {
+              rebuiltLedgers.push({
+                id: `ldg-${t.transactionCode}`,
+                customerId: t.customerId,
+                transactionId: t.id,
+                type: 'earn',
+                amount: t.stampEarned,
+                balanceAfter: 0,
+                description: `Stempel transaksi ${t.transactionCode}`,
+                createdBy: t.createdBy || 'Admin SCS',
+                createdAt: t.createdAt,
+              });
+            });
+
+          mergedRedemptions
+            .filter(r => r.status === 'completed')
+            .forEach(r => {
+              rebuiltLedgers.push({
+                id: `ldg-rdm-${r.redemptionCode}`,
+                customerId: r.customerId,
+                redemptionId: r.id,
+                type: 'redeem',
+                amount: -r.stampsUsed,
+                balanceAfter: 0,
+                description: `Penukaran hadiah ${r.rewardName}`,
+                createdBy: r.redeemedBy || 'Admin SCS',
+                createdAt: r.redeemedAt,
+              });
+            });
+
+          // Preserve any sync adjustment ledgers from Sheets if Sheet Pelanggan had extra balance
+          pulled.ledgers
+            .filter(l => l.id.startsWith('ldg-sync-'))
+            .forEach(syncL => {
+              const cid = resolveCustId(syncL.customerId);
+              const currentCalc = rebuiltLedgers
+                .filter(l => l.customerId === cid)
+                .reduce((s, i) => s + i.amount, 0);
+              if (syncL.balanceAfter > currentCalc) {
+                rebuiltLedgers.push({
+                  ...syncL,
+                  customerId: cid,
+                  amount: syncL.balanceAfter - currentCalc,
+                });
+              }
+            });
+
+          // Compute chronological balanceAfter per customer
+          mergedCustomers.forEach(c => {
+            let running = 0;
+            rebuiltLedgers
+              .filter(l => l.customerId === c.id)
+              .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+              .forEach(l => {
+                running += l.amount;
+                l.balanceAfter = running;
+              });
+          });
+
           const next = {
             ...prev,
-            customers: res.data!.customers,
-            transactions: res.data!.transactions,
-            ledgers: res.data!.ledgers,
-            redemptions: res.data!.redemptions,
+            customers: mergedCustomers,
+            transactions: mergedTransactions,
+            ledgers: rebuiltLedgers,
+            redemptions: mergedRedemptions,
             settings: {
               ...prev.settings,
               googleSheetsLastSync: new Date().toISOString(),

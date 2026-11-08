@@ -1,6 +1,11 @@
 import { Customer, Transaction, TransactionCategory, StampLedger, Reward, Redemption, StoreSettings } from '../types';
 
-const ENV_SHEETS_URL = (import.meta as any).env?.VITE_GOOGLE_SHEETS_URL || '';
+// ============================================================================
+// URL GOOGLE APPS SCRIPT DEFAULT (OTOMATIS AKTIF DI SEMUA PERANGKAT / BROWSER)
+// ============================================================================
+export const HARDCODED_GOOGLE_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwj7BQ17Pqlfv06bc1WpiABr5yoKeyTPwvXFpkSslTZfnhl2ByaCpLRNCBeByi2wtfq/exec';
+
+const DEFAULT_SHEETS_URL = HARDCODED_GOOGLE_SHEETS_URL || (import.meta as any).env?.VITE_GOOGLE_SHEETS_URL || '';
 
 export const DEFAULT_SETTINGS: StoreSettings = {
   storeName: 'SCS Fotocopy',
@@ -11,7 +16,7 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   rewardRequiredStamps: 25, // 25 stamps = 1 reward
   defaultRewardName: 'Minyak goreng 500 ml',
   adminPin: '1234',
-  googleSheetsScriptUrl: ENV_SHEETS_URL,
+  googleSheetsScriptUrl: DEFAULT_SHEETS_URL,
 };
 
 export const DEFAULT_CATEGORIES: TransactionCategory[] = [
@@ -99,8 +104,8 @@ export function loadAppData(): AppData {
         if (qUrl && qUrl.startsWith('https://script.google.com/')) {
           settings = { ...settings, googleSheetsScriptUrl: qUrl };
           localStorage.setItem(KEYS.SETTINGS, JSON.stringify(settings));
-        } else if (!settings.googleSheetsScriptUrl && ENV_SHEETS_URL) {
-          settings = { ...settings, googleSheetsScriptUrl: ENV_SHEETS_URL };
+        } else if (!settings.googleSheetsScriptUrl && DEFAULT_SHEETS_URL) {
+          settings = { ...settings, googleSheetsScriptUrl: DEFAULT_SHEETS_URL };
         }
       } catch (e) {
         // ignore url parsing error

@@ -20,15 +20,11 @@ export const LoginModal: React.FC<Props> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (pin === settings.adminPin || pin === '1234') {
+    if (pin === (settings.adminPin || '1234')) {
       onLoginSuccess();
     } else {
       setError('PIN Admin tidak sesuai. Silakan coba lagi.');
     }
-  };
-
-  const handleQuickDemoLogin = () => {
-    onLoginSuccess();
   };
 
   return (
@@ -65,9 +61,6 @@ export const LoginModal: React.FC<Props> = ({
                 className="w-full text-center text-2xl font-mono tracking-widest py-3 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-orange-500/30 focus:border-orange-500"
               />
             </div>
-            <p className="text-[11px] text-slate-400 text-center mt-1">
-              PIN Default: <strong className="text-slate-600 font-mono">1234</strong>
-            </p>
           </div>
 
           {error && (
@@ -82,14 +75,6 @@ export const LoginModal: React.FC<Props> = ({
           >
             <KeyRound className="w-4 h-4" />
             <span>Buka Dashboard Kasir</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleQuickDemoLogin}
-            className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
-          >
-            Masuk Otomatis (Demo Admin)
           </button>
         </form>
       </div>

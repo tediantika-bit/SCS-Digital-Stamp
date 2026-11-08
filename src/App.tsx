@@ -19,6 +19,7 @@ import {
   ExternalLink,
   Smartphone,
   Store,
+  RefreshCw,
 } from 'lucide-react';
 
 import {
@@ -42,6 +43,7 @@ import {
   sendTransactionToGoogleSheets,
   sendCustomerToGoogleSheets,
   sendRedemptionToGoogleSheets,
+  fetchDataFromGoogleSheets,
 } from './utils/googleSheets';
 
 // Views
@@ -137,6 +139,69 @@ export default function App() {
       localStorage.removeItem('scs_admin_auth');
     }
   };
+
+  // Google Sheets Auto-Pull on Mount & Manual Pull for Cross-Device Sync
+  const [isPullingSheets, setIsPullingSheets] = useState(false);
+  const [pullMessage, setPullMessage] = useState<string | null>(null);
+
+  const handlePullFromSheets = async (showNotification = true): Promise<boolean> => {
+    const url = data.settings.googleSheetsScriptUrl;
+    if (!url) {
+      if (showNotification) {
+        setPullMessage('URL Google Apps Script belum diisi di Pengaturan.');
+        setTimeout(() => setPullMessage(null), 4000);
+      }
+      return false;
+    }
+
+    setIsPullingSheets(true);
+    try {
+      const res = await fetchDataFromGoogleSheets(url);
+      if (res.success && res.data) {
+        setData(prev => {
+          const next = {
+            ...prev,
+            customers: res.data!.customers,
+            transactions: res.data!.transactions,
+            ledgers: res.data!.ledgers,
+            redemptions: res.data!.redemptions,
+            settings: {
+              ...prev.settings,
+              googleSheetsLastSync: new Date().toISOString(),
+            },
+          };
+          saveAppData(next);
+          return next;
+        });
+        if (showNotification) {
+          setPullMessage(res.message);
+          setTimeout(() => setPullMessage(null), 4000);
+        }
+        return true;
+      } else {
+        if (showNotification) {
+          setPullMessage(res.message);
+          setTimeout(() => setPullMessage(null), 5000);
+        }
+        return false;
+      }
+    } catch (e: any) {
+      if (showNotification) {
+        setPullMessage('Gagal mengambil data dari Google Spreadsheet');
+        setTimeout(() => setPullMessage(null), 4000);
+      }
+      return false;
+    } finally {
+      setIsPullingSheets(false);
+    }
+  };
+
+  // Auto-pull on app load if script url is present
+  useEffect(() => {
+    if (data.settings.googleSheetsScriptUrl) {
+      handlePullFromSheets(false);
+    }
+  }, []);
 
   // Transaction Handler
   const handleAddTransaction = (trxInput: {
@@ -524,6 +589,10 @@ export default function App() {
             onSaveSettings={handleSaveSettings}
             onSaveCategories={handleSaveCategories}
             onResetData={handleResetData}
+            onPullData={async () => {
+              await handlePullFromSheets(true);
+            }}
+            isPulling={isPullingSheets}
           />
         );
 
@@ -617,6 +686,20 @@ export default function App() {
 
           {/* Zone 3: 1 Primary Action + Quick Utilities */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Quick Pull Data from Google Sheets button */}
+            {data.settings.googleSheetsScriptUrl && (
+              <button
+                type="button"
+                onClick={() => handlePullFromSheets(true)}
+                disabled={isPullingSheets}
+                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-[11px] font-bold transition active:scale-95 shrink-0"
+                title="Tarik data terbaru dari Google Spreadsheet"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isPullingSheets ? 'animate-spin' : ''}`} />
+                <span className="hidden md:inline">{isPullingSheets ? 'Menarik...' : 'Tarik Data'}</span>
+              </button>
+            )}
+
             {/* PWA Install Button */}
             <PWAInstallButton className="hidden sm:inline-flex" />
 
@@ -654,6 +737,24 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* Toast Notification Banner for Sheets Sync / Pull */}
+      {pullMessage && (
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 pt-3 animate-in fade-in duration-200">
+          <div className="bg-emerald-700 text-white px-4 py-2.5 rounded-2xl text-xs font-semibold flex items-center justify-between shadow-lg">
+            <div className="flex items-center gap-2">
+              <RefreshCw className="w-4 h-4 shrink-0" />
+              <span>{pullMessage}</span>
+            </div>
+            <button
+              onClick={() => setPullMessage(null)}
+              className="text-emerald-200 hover:text-white text-xs font-bold px-2 py-0.5 ml-2"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Viewport */}
       <main className="max-w-7xl mx-auto px-3 sm:px-6 pt-4 sm:pt-6 pb-24 lg:pb-8 flex-1 w-full max-w-full">

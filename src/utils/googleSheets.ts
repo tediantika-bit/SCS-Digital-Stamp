@@ -91,6 +91,14 @@ function doGet(e) {
       timestamp: new Date().toISOString()
     })).setMimeType(ContentService.MimeType.JSON);
   }
+
+  // Tarik Seluruh Data untuk Sinkronisasi Antar Perangkat
+  if (action === "get_data") {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var result = getAllDataFromSheets(ss);
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   
   return ContentService.createTextOutput(JSON.stringify({ status: "ready" }))
     .setMimeType(ContentService.MimeType.JSON);
@@ -276,6 +284,90 @@ function updateCustomerBalance(ss, customerId, newBalance) {
     sheet.getRange(row, 5).setValue(newBalance >= 25 ? "Siap Klaim Hadiah" : "Belum Siap");
   }
 }
+
+function getAllDataFromSheets(ss) {
+  var result = {
+    success: true,
+    customers: [],
+    transactions: [],
+    redemptions: [],
+    timestamp: new Date().toISOString()
+  };
+
+  // 1. Baca Sheet Pelanggan
+  var sheetC = ss.getSheetByName("Pelanggan");
+  if (sheetC && sheetC.getLastRow() > 1) {
+    var rowsC = sheetC.getRange(2, 1, sheetC.getLastRow() - 1, 7).getValues();
+    for (var i = 0; i < rowsC.length; i++) {
+      var r = rowsC[i];
+      if (r[0] || r[1]) {
+        var cCode = String(r[0] || "").trim();
+        result.customers.push({
+          id: cCode,
+          customerCode: cCode,
+          name: String(r[1] || "").trim(),
+          phone: String(r[2] || "").trim(),
+          balance: Number(r[3]) || 0,
+          createdAt: r[5] ? new Date(r[5]).toISOString() : new Date().toISOString(),
+          cardUrl: String(r[6] || "").trim(),
+          status: "active"
+        });
+      }
+    }
+  }
+
+  // 2. Baca Sheet Transaksi
+  var sheetT = ss.getSheetByName("Transaksi");
+  if (sheetT && sheetT.getLastRow() > 1) {
+    var rowsT = sheetT.getRange(2, 1, sheetT.getLastRow() - 1, 8).getValues();
+    for (var j = 0; j < rowsT.length; j++) {
+      var rt = rowsT[j];
+      if (rt[0] || rt[2]) {
+        var tCode = String(rt[0] || "").trim();
+        result.transactions.push({
+          id: "trx-" + tCode,
+          transactionCode: tCode,
+          createdAt: rt[1] ? new Date(rt[1]).toISOString() : new Date().toISOString(),
+          customerId: String(rt[2] || "").trim(),
+          customerName: String(rt[3] || "").trim(),
+          amount: Number(rt[4]) || 0,
+          stampEarned: Number(rt[5]) || 0,
+          description: String(rt[6] || "Transaksi Toko").trim(),
+          status: String(rt[7] || "confirmed").trim(),
+          categoryId: "cat-general",
+          categoryName: "Transaksi Toko"
+        });
+      }
+    }
+  }
+
+  // 3. Baca Sheet Penukaran Hadiah
+  var sheetH = ss.getSheetByName("Penukaran_Hadiah");
+  if (sheetH && sheetH.getLastRow() > 1) {
+    var rowsH = sheetH.getRange(2, 1, sheetH.getLastRow() - 1, 8).getValues();
+    for (var k = 0; k < rowsH.length; k++) {
+      var rh = rowsH[k];
+      if (rh[0] || rh[2]) {
+        var rCode = String(rh[0] || "").trim();
+        result.redemptions.push({
+          id: "rdm-" + rCode,
+          redemptionCode: rCode,
+          redeemedAt: rh[1] ? new Date(rh[1]).toISOString() : new Date().toISOString(),
+          customerId: String(rh[2] || "").trim(),
+          customerName: String(rh[3] || "").trim(),
+          rewardName: String(rh[4] || "Minyak goreng 500 ml").trim(),
+          rewardId: "rew-1",
+          stampsUsed: Number(rh[5]) || 25,
+          remainingBalance: Number(rh[6]) || 0,
+          notes: String(rh[7] || "Diterima langsung").trim(),
+          status: "completed"
+        });
+      }
+    }
+  }
+
+  return result;
+}
 `;
 
 /**
@@ -460,3 +552,136 @@ export function sendRedemptionToGoogleSheets(
     remainingBalance,
   });
 }
+
+export interface PulledSheetsData {
+  customers: Customer[];
+  transactions: Transaction[];
+  ledgers: StampLedger[];
+  redemptions: Redemption[];
+}
+
+/**
+ * Fetches all customers, transactions, and redemptions from Google Spreadsheet
+ * Enables cross-browser and cross-device sync!
+ */
+export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
+  success: boolean;
+  data?: PulledSheetsData;
+  message: string;
+}> {
+  if (!scriptUrl || !scriptUrl.startsWith('https://script.google.com/macros/s/')) {
+    return {
+      success: false,
+      message: 'Format URL Google Apps Script tidak valid.',
+    };
+  }
+
+  try {
+    const url = `${scriptUrl}?action=get_data&t=${Date.now()}`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!res.ok) {
+      return {
+        success: false,
+        message: `HTTP ${res.status}: Gagal menghubungi Google Apps Script.`,
+      };
+    }
+
+    const json = await res.json();
+    if (!json.success) {
+      return {
+        success: false,
+        message: json.error || 'Respon dari Spreadsheet tidak valid.',
+      };
+    }
+
+    const customers: Customer[] = (json.customers || []).map((c: any) => ({
+      id: c.id || c.customerCode,
+      customerCode: c.customerCode || c.id,
+      name: c.name || 'Pelanggan',
+      phone: c.phone || '',
+      qrToken: c.cardUrl && c.cardUrl.includes('#card=') ? c.cardUrl.split('#card=')[1] : c.id,
+      status: 'active',
+      createdAt: c.createdAt || new Date().toISOString(),
+    }));
+
+    const transactions: Transaction[] = (json.transactions || []).map((t: any) => ({
+      id: t.id || `trx-${t.transactionCode}`,
+      transactionCode: t.transactionCode,
+      customerId: t.customerId,
+      customerName: t.customerName,
+      categoryId: t.categoryId || 'cat-general',
+      categoryName: t.categoryName || 'Transaksi Toko',
+      amount: Number(t.amount) || 0,
+      stampEarned: Number(t.stampEarned) || 0,
+      status: t.status || 'confirmed',
+      description: t.description || 'Transaksi Toko',
+      createdBy: 'Kasir SCS',
+      createdAt: t.createdAt || new Date().toISOString(),
+    }));
+
+    const redemptions: Redemption[] = (json.redemptions || []).map((r: any) => ({
+      id: r.id || `rdm-${r.redemptionCode}`,
+      redemptionCode: r.redemptionCode,
+      customerId: r.customerId,
+      customerName: r.customerName,
+      rewardId: r.rewardId || 'rew-1',
+      rewardName: r.rewardName || 'Minyak goreng 500 ml',
+      stampsUsed: Number(r.stampsUsed) || 25,
+      redeemedAt: r.redeemedAt || new Date().toISOString(),
+      notes: r.notes || '',
+      status: 'completed',
+    }));
+
+    // Reconstruct ledger entries
+    const ledgers: StampLedger[] = [];
+    transactions.forEach(t => {
+      ledgers.push({
+        id: `ldg-${t.transactionCode}`,
+        customerId: t.customerId,
+        transactionId: t.id,
+        type: 'earn',
+        amount: t.stampEarned,
+        balanceAfter: 0,
+        description: `Stempel transaksi ${t.transactionCode}`,
+        createdBy: 'Kasir SCS',
+        createdAt: t.createdAt,
+      });
+    });
+
+    redemptions.forEach(r => {
+      ledgers.push({
+        id: `ldg-rdm-${r.redemptionCode}`,
+        customerId: r.customerId,
+        type: 'redeem',
+        amount: -r.stampsUsed,
+        balanceAfter: 0,
+        description: `Penukaran hadiah ${r.rewardName}`,
+        createdBy: 'Admin SCS',
+        createdAt: r.redeemedAt,
+      });
+    });
+
+    return {
+      success: true,
+      data: {
+        customers,
+        transactions,
+        ledgers,
+        redemptions,
+      },
+      message: `Berhasil menarik ${customers.length} pelanggan dan ${transactions.length} transaksi dari Spreadsheet!`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal menarik data: ${err.message || 'Kendala jaringan'}. Pastikan URL Script benar dan izin telah diatur ke "Anyone".`,
+    };
+  }
+}
+

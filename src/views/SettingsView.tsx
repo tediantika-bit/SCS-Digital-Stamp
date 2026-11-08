@@ -36,6 +36,8 @@ interface Props {
   onSaveSettings: (settings: StoreSettings) => void;
   onSaveCategories?: (categories: TransactionCategory[]) => void;
   onResetData: () => void;
+  onPullData?: () => Promise<any> | void;
+  isPulling?: boolean;
 }
 
 export const SettingsView: React.FC<Props> = ({
@@ -47,6 +49,8 @@ export const SettingsView: React.FC<Props> = ({
   ledgers = [],
   onSaveSettings,
   onResetData,
+  onPullData,
+  isPulling = false,
 }) => {
   const [formData, setFormData] = useState<StoreSettings>({ ...settings });
   const [savedMessage, setSavedMessage] = useState(false);
@@ -55,6 +59,7 @@ export const SettingsView: React.FC<Props> = ({
   // Google Sheets state
   const [showScriptModal, setShowScriptModal] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedMagicLink, setCopiedMagicLink] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<{ success: boolean; message: string } | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -318,24 +323,78 @@ export const SettingsView: React.FC<Props> = ({
           )}
 
           {formData.googleSheetsScriptUrl && (
-            <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="text-[11px] text-slate-500">
-                {formData.googleSheetsLastSync ? (
-                  <span>Terakhir disinkronkan: <strong>{formatDate(formData.googleSheetsLastSync)}</strong></span>
-                ) : (
-                  <span>Status: Siap menyinkronkan data toko</span>
-                )}
+            <div className="pt-3 border-t border-slate-100 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="text-[11px] text-slate-500">
+                  {formData.googleSheetsLastSync ? (
+                    <span>Terakhir disinkronkan: <strong>{formatDate(formData.googleSheetsLastSync)}</strong></span>
+                  ) : (
+                    <span>Status: Siap menyinkronkan data toko</span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {onPullData && (
+                    <button
+                      type="button"
+                      onClick={onPullData}
+                      disabled={isPulling}
+                      className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition shadow-xs active:scale-95"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isPulling ? 'animate-spin text-blue-600' : 'text-blue-600'}`} />
+                      <span>{isPulling ? 'Menarik data...' : 'Tarik Data dari Spreadsheet'}</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleSyncAll}
+                    disabled={isSyncing}
+                    className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold transition shadow-xs active:scale-95"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                    <span>{isSyncing ? 'Mengirim...' : 'Kirim Semua Data ke Sheets'}</span>
+                  </button>
+                </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleSyncAll}
-                disabled={isSyncing}
-                className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold transition shadow-xs active:scale-95"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                <span>{isSyncing ? 'Menyinkronkan...' : 'Sinkronkan Semua Data Sekarang'}</span>
-              </button>
+              {/* Cross-Device / Vercel Setup Guide */}
+              <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200 text-slate-800 text-xs space-y-2">
+                <div className="flex items-center gap-2 font-bold text-amber-900">
+                  <Sparkles className="w-4 h-4 text-amber-600" />
+                  <span>Agar Data & URL Otomatis Sama di Perangkat Lain (HP Kasir / Owner):</span>
+                </div>
+                
+                <div className="space-y-1.5 text-[11px] text-slate-600">
+                  <p>
+                    <strong>Cara 1 (Rekomendasi di Vercel - 100% Otomatis):</strong> Masuk ke Dashboard Vercel &rarr; Buka Project &rarr; <strong>Settings</strong> &rarr; <strong>Environment Variables</strong> &rarr; Tambahkan:
+                  </p>
+                  <div className="bg-white p-2 rounded-lg border border-amber-200 font-mono text-[11px] text-slate-800 select-all">
+                    Key: <strong>VITE_GOOGLE_SHEETS_URL</strong><br />
+                    Value: <strong>{formData.googleSheetsScriptUrl}</strong>
+                  </div>
+                  <p className="text-slate-500">
+                    Setelah ditambahkan, klik <strong>Redeploy</strong> di Vercel. Seluruh HP atau browser baru yang membuka link toko akan langsung terhubung secara otomatis tanpa perlu mengisi URL lagi!
+                  </p>
+
+                  <div className="pt-2 flex items-center justify-between">
+                    <span><strong>Cara 2 (Buka via Link Langsung):</strong> Bagikan link berikut ke perangkat kasir baru:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+                        const link = `${origin}/?sheetUrl=${encodeURIComponent(formData.googleSheetsScriptUrl || '')}`;
+                        navigator.clipboard.writeText(link);
+                        setCopiedMagicLink(true);
+                        setTimeout(() => setCopiedMagicLink(false), 3000);
+                      }}
+                      className="px-3 py-1 bg-white border border-amber-300 rounded-lg text-amber-900 font-bold hover:bg-amber-100 transition shrink-0 ml-2"
+                    >
+                      {copiedMagicLink ? '✓ Tersalin!' : 'Salin Link Otomatis'}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 

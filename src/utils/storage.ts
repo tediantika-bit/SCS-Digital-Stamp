@@ -1,5 +1,7 @@
 import { Customer, Transaction, TransactionCategory, StampLedger, Reward, Redemption, StoreSettings } from '../types';
 
+const ENV_SHEETS_URL = (import.meta as any).env?.VITE_GOOGLE_SHEETS_URL || '';
+
 export const DEFAULT_SETTINGS: StoreSettings = {
   storeName: 'SCS Fotocopy',
   storeTagline: 'Pusat Fotocopy, PPOB & Pembayaran Digital',
@@ -9,6 +11,7 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   rewardRequiredStamps: 25, // 25 stamps = 1 reward
   defaultRewardName: 'Minyak goreng 500 ml',
   adminPin: '1234',
+  googleSheetsScriptUrl: ENV_SHEETS_URL,
 };
 
 export const DEFAULT_CATEGORIES: TransactionCategory[] = [
@@ -86,8 +89,26 @@ export function loadAppData(): AppData {
     const rawRewards = localStorage.getItem(KEYS.REWARDS);
     const rawRedemptions = localStorage.getItem(KEYS.REDEMPTIONS);
 
+    let settings: StoreSettings = rawSettings ? JSON.parse(rawSettings) : DEFAULT_SETTINGS;
+
+    // Check query params (?sheetUrl=... or ?sheetsUrl=...) to auto-configure device
+    if (typeof window !== 'undefined') {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const qUrl = params.get('sheetsUrl') || params.get('sheetUrl');
+        if (qUrl && qUrl.startsWith('https://script.google.com/')) {
+          settings = { ...settings, googleSheetsScriptUrl: qUrl };
+          localStorage.setItem(KEYS.SETTINGS, JSON.stringify(settings));
+        } else if (!settings.googleSheetsScriptUrl && ENV_SHEETS_URL) {
+          settings = { ...settings, googleSheetsScriptUrl: ENV_SHEETS_URL };
+        }
+      } catch (e) {
+        // ignore url parsing error
+      }
+    }
+
     return {
-      settings: rawSettings ? JSON.parse(rawSettings) : DEFAULT_SETTINGS,
+      settings,
       categories: rawCategories ? JSON.parse(rawCategories) : DEFAULT_CATEGORIES,
       customers: rawCustomers ? JSON.parse(rawCustomers) : DEFAULT_CUSTOMERS,
       transactions: rawTransactions ? JSON.parse(rawTransactions) : DEFAULT_TRANSACTIONS,

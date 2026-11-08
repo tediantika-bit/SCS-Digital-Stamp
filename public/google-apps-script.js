@@ -86,6 +86,14 @@ function doGet(e) {
       timestamp: new Date().toISOString()
     })).setMimeType(ContentService.MimeType.JSON);
   }
+
+  // Tarik Seluruh Data untuk Sinkronisasi Antar Perangkat
+  if (action === "get_data") {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var result = getAllDataFromSheets(ss);
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   
   return ContentService.createTextOutput(JSON.stringify({ status: "ready" }))
     .setMimeType(ContentService.MimeType.JSON);
@@ -268,3 +276,88 @@ function updateCustomerBalance(ss, customerId, newBalance) {
     sheet.getRange(row, 5).setValue(newBalance >= 25 ? "Siap Klaim Hadiah" : "Belum Siap");
   }
 }
+
+function getAllDataFromSheets(ss) {
+  var result = {
+    success: true,
+    customers: [],
+    transactions: [],
+    redemptions: [],
+    timestamp: new Date().toISOString()
+  };
+
+  // 1. Baca Sheet Pelanggan
+  var sheetC = ss.getSheetByName("Pelanggan");
+  if (sheetC && sheetC.getLastRow() > 1) {
+    var rowsC = sheetC.getRange(2, 1, sheetC.getLastRow() - 1, 7).getValues();
+    for (var i = 0; i < rowsC.length; i++) {
+      var r = rowsC[i];
+      if (r[0] || r[1]) {
+        var cCode = String(r[0] || "").trim();
+        result.customers.push({
+          id: cCode,
+          customerCode: cCode,
+          name: String(r[1] || "").trim(),
+          phone: String(r[2] || "").trim(),
+          balance: Number(r[3]) || 0,
+          createdAt: r[5] ? new Date(r[5]).toISOString() : new Date().toISOString(),
+          cardUrl: String(r[6] || "").trim(),
+          status: "active"
+        });
+      }
+    }
+  }
+
+  // 2. Baca Sheet Transaksi
+  var sheetT = ss.getSheetByName("Transaksi");
+  if (sheetT && sheetT.getLastRow() > 1) {
+    var rowsT = sheetT.getRange(2, 1, sheetT.getLastRow() - 1, 8).getValues();
+    for (var j = 0; j < rowsT.length; j++) {
+      var rt = rowsT[j];
+      if (rt[0] || rt[2]) {
+        var tCode = String(rt[0] || "").trim();
+        result.transactions.push({
+          id: "trx-" + tCode,
+          transactionCode: tCode,
+          createdAt: rt[1] ? new Date(rt[1]).toISOString() : new Date().toISOString(),
+          customerId: String(rt[2] || "").trim(),
+          customerName: String(rt[3] || "").trim(),
+          amount: Number(rt[4]) || 0,
+          stampEarned: Number(rt[5]) || 0,
+          description: String(rt[6] || "Transaksi Toko").trim(),
+          status: String(rt[7] || "confirmed").trim(),
+          categoryId: "cat-general",
+          categoryName: "Transaksi Toko"
+        });
+      }
+    }
+  }
+
+  // 3. Baca Sheet Penukaran Hadiah
+  var sheetH = ss.getSheetByName("Penukaran_Hadiah");
+  if (sheetH && sheetH.getLastRow() > 1) {
+    var rowsH = sheetH.getRange(2, 1, sheetH.getLastRow() - 1, 8).getValues();
+    for (var k = 0; k < rowsH.length; k++) {
+      var rh = rowsH[k];
+      if (rh[0] || rh[2]) {
+        var rCode = String(rh[0] || "").trim();
+        result.redemptions.push({
+          id: "rdm-" + rCode,
+          redemptionCode: rCode,
+          redeemedAt: rh[1] ? new Date(rh[1]).toISOString() : new Date().toISOString(),
+          customerId: String(rh[2] || "").trim(),
+          customerName: String(rh[3] || "").trim(),
+          rewardName: String(rh[4] || "Minyak goreng 500 ml").trim(),
+          rewardId: "rew-1",
+          stampsUsed: Number(rh[5]) || 25,
+          remainingBalance: Number(rh[6]) || 0,
+          notes: String(rh[7] || "Diterima langsung").trim(),
+          status: "completed"
+        });
+      }
+    }
+  }
+
+  return result;
+}
+

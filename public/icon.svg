@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="scsOrange" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f97316"/>
+      <stop offset="100%" stop-color="#ea580c"/>
+    </linearGradient>
+    <linearGradient id="scsBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a8a"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#ea580c" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  
+  <!-- Outer Rounded Square -->
+  <rect x="24" y="24" width="464" height="464" rx="100" fill="url(#scsOrange)" filter="url(#shadow)"/>
+  
+  <!-- Inner Card Shield / Stamp Frame -->
+  <rect x="56" y="56" width="400" height="400" rx="76" fill="#ffffff" fill-opacity="0.96"/>
+  
+  <!-- Stamp Circular Border -->
+  <circle cx="256" cy="230" r="140" fill="none" stroke="#ea580c" stroke-width="12" stroke-dasharray="8 6"/>
+  <circle cx="256" cy="230" r="120" fill="none" stroke="#ea580c" stroke-width="4"/>
+  
+  <!-- SCS Fotocopy Arc Text / Bold Monogram -->
+  <path id="curve" fill="none" d="M 160 210 A 100 100 0 0 1 352 210" />
+  
+  <!-- Central Stamp Emblem -->
+  <g fill="#ea580c">
+    <!-- Star cluster -->
+    <polygon points="256,130 264,152 288,152 268,166 276,188 256,174 236,188 244,166 224,152 248,152"/>
+    <text x="256" y="242" font-family="Arial, Helvetica, sans-serif" font-size="52" font-weight="900" text-anchor="middle" fill="#ea580c" letter-spacing="2">SCS</text>
+    <text x="256" y="278" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" text-anchor="middle" fill="#1e3a8a" letter-spacing="4">FOTOCOPY</text>
+    <text x="256" y="302" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" text-anchor="middle" fill="#64748b" letter-spacing="2">DIGITAL STAMP</text>
+  </g>
+  
+  <!-- Bottom Ribbon / Pill with "LOYALTY CARD" -->
+  <rect x="136" y="388" width="240" height="48" rx="24" fill="url(#scsBlue)"/>
+  <text x="256" y="418" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" text-anchor="middle" fill="#ffffff" letter-spacing="3">LOYALITAS 25</text>
+</svg>

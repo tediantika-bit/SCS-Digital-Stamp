@@ -1,0 +1,6 @@
+{
+  "name": "SCS Digital Stamp - Kartu Loyalitas SCS Fotocopy",
+  "description": "Aplikasi loyalitas pelanggan digital untuk SCS Fotocopy dengan sistem stempel otomatis nominal transaksi, kartu digital 25 kotak, dan penukaran hadiah.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

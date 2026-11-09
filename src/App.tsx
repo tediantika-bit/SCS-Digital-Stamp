@@ -789,16 +789,24 @@ export default function App() {
           {/* Zone 1: Brand Wordmark */}
           <div
             onClick={() => setActiveTab('dashboard')}
-            className="flex items-center gap-2 sm:gap-2.5 cursor-pointer shrink min-w-0"
+            className="flex items-center gap-3 sm:gap-3.5 cursor-pointer shrink min-w-0"
           >
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-orange-600 text-white flex items-center justify-center font-black text-xs sm:text-sm shadow-md shadow-orange-600/20 shrink-0">
-              SCS
-            </div>
+            {data.settings.storeLogo ? (
+              <img
+                src={data.settings.storeLogo}
+                alt={data.settings.storeName}
+                className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl object-contain bg-white border border-slate-200/80 p-1 shadow-sm shrink-0"
+              />
+            ) : (
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-orange-600 text-white flex items-center justify-center font-black text-base sm:text-lg shadow-md shadow-orange-600/20 shrink-0">
+                SCS
+              </div>
+            )}
             <div className="min-w-0">
-              <span className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight block leading-tight truncate">
+              <span className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight block leading-tight truncate">
                 SCS Digital Stamp
               </span>
-              <span className="hidden sm:block text-[10px] text-slate-500 font-semibold tracking-wide truncate">
+              <span className="hidden sm:block text-[11px] text-slate-500 font-semibold tracking-wide truncate">
                 {data.settings.storeName}
               </span>
             </div>

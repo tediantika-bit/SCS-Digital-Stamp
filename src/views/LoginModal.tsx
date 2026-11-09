@@ -31,10 +31,18 @@ export const LoginModal: React.FC<Props> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
       <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
         <div className="text-center mb-6">
-          <div className="w-14 h-14 rounded-2xl bg-orange-600 text-white flex items-center justify-center mx-auto mb-3 shadow-lg shadow-orange-600/30 font-black text-xl">
-            SCS
-          </div>
-          <h2 className="text-lg font-black text-slate-900 tracking-tight">
+          {settings.storeLogo ? (
+            <img
+              src={settings.storeLogo}
+              alt={settings.storeName}
+              className="w-36 h-36 rounded-3xl object-contain bg-white border border-slate-200 p-2.5 mx-auto mb-3 shadow-xl"
+            />
+          ) : (
+            <div className="w-24 h-24 rounded-3xl bg-orange-600 text-white flex items-center justify-center mx-auto mb-3 shadow-lg shadow-orange-600/30 font-black text-3xl">
+              SCS
+            </div>
+          )}
+          <h2 className="text-xl font-black text-slate-900 tracking-tight">
             Masuk Admin {settings.storeName}
           </h2>
           <p className="text-xs text-slate-500 mt-1">

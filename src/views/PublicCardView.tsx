@@ -39,15 +39,23 @@ export const PublicCardView: React.FC<Props> = ({
       {/* Top Mobile Bar */}
       <header className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80 px-4 py-3">
         <div className="max-w-md mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-orange-600 text-white flex items-center justify-center font-black text-xs shadow-xs">
-              SCS
-            </div>
+          <div className="flex items-center gap-3.5">
+            {settings.storeLogo ? (
+              <img
+                src={settings.storeLogo}
+                alt={settings.storeName}
+                className="w-16 h-16 rounded-2xl object-contain bg-white border border-slate-200/80 p-1 shadow-sm shrink-0"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-2xl bg-orange-600 text-white flex items-center justify-center font-black text-base shadow-sm shrink-0">
+                SCS
+              </div>
+            )}
             <div>
-              <h1 className="font-extrabold text-xs text-slate-900 leading-tight">
+              <h1 className="font-extrabold text-base text-slate-900 leading-tight">
                 {settings.storeName}
               </h1>
-              <p className="text-[10px] text-slate-500">Kartu Stempel Digital</p>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">Kartu Stempel Digital</p>
             </div>
           </div>
 

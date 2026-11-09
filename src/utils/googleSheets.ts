@@ -323,7 +323,8 @@ function saveSettingsToSheet(ss, s) {
     ["stampThreshold", s.stampThreshold || 20000],
     ["rewardRequiredStamps", s.rewardRequiredStamps || 25],
     ["defaultRewardName", s.defaultRewardName || ""],
-    ["adminPin", s.adminPin || "1234"]
+    ["adminPin", s.adminPin || "1234"],
+    ["storeLogo", s.storeLogo || ""]
   ];
   sheetS.getRange(1, 1, rows.length, 2).setValues(rows);
   sheetS.getRange(1, 1, 1, 2).setBackground("#475569").setFontColor("#ffffff").setFontWeight("bold");
@@ -541,6 +542,7 @@ export async function syncAllToGoogleSheets(
       storeTagline: settings.storeTagline,
       storeAddress: settings.storeAddress,
       storePhone: settings.storePhone,
+      storeLogo: settings.storeLogo || '',
       stampThreshold: settings.stampThreshold,
       rewardRequiredStamps: settings.rewardRequiredStamps,
       defaultRewardName: settings.defaultRewardName,
@@ -644,6 +646,7 @@ export function sendSettingsToGoogleSheets(
       storeTagline: settings.storeTagline,
       storeAddress: settings.storeAddress,
       storePhone: settings.storePhone,
+      storeLogo: settings.storeLogo || '',
       stampThreshold: settings.stampThreshold,
       rewardRequiredStamps: settings.rewardRequiredStamps,
       defaultRewardName: settings.defaultRewardName,
@@ -846,6 +849,7 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
       if (json.settings.storeTagline) pulledSettings.storeTagline = String(json.settings.storeTagline);
       if (json.settings.storeAddress) pulledSettings.storeAddress = String(json.settings.storeAddress);
       if (json.settings.storePhone) pulledSettings.storePhone = String(json.settings.storePhone);
+      if (json.settings.storeLogo) pulledSettings.storeLogo = String(json.settings.storeLogo);
       if (json.settings.stampThreshold) pulledSettings.stampThreshold = Number(json.settings.stampThreshold) || 20000;
       if (json.settings.rewardRequiredStamps) pulledSettings.rewardRequiredStamps = Number(json.settings.rewardRequiredStamps) || 25;
       if (json.settings.defaultRewardName) pulledSettings.defaultRewardName = String(json.settings.defaultRewardName);

@@ -16,6 +16,8 @@ import {
   CheckCircle2,
   X,
   Sparkles,
+  Upload,
+  Image,
 } from 'lucide-react';
 import { StoreSettings, TransactionCategory, Reward, Customer, Transaction, Redemption, StampLedger } from '../types';
 import { formatRupiah, formatDate } from '../utils/storage';
@@ -206,6 +208,75 @@ export const SettingsView: React.FC<Props> = ({
             <Store className="w-4 h-4 text-orange-600" />
             <span>Identitas Toko & Kontak</span>
           </h3>
+
+          {/* Logo Toko */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+              Logo Toko
+            </label>
+            <div className="flex flex-col sm:flex-row items-center gap-4">
+              <div className="w-40 h-40 rounded-3xl border-2 border-dashed border-slate-300 bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
+                {formData.storeLogo ? (
+                  <img
+                    src={formData.storeLogo}
+                    alt="Logo Toko"
+                    className="w-full h-full object-contain p-2"
+                  />
+                ) : (
+                  <div className="text-center p-3 text-slate-400">
+                    <Image className="w-10 h-10 mx-auto mb-1 text-slate-300" />
+                    <span className="text-xs font-bold block">Teks SCS</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-1 space-y-2 text-center sm:text-left">
+                <p className="text-xs text-slate-600">
+                  Unggah logo toko untuk ditampilkan di Header Admin, Kartu Stempel Digital pelanggan, dan Layar Login.
+                </p>
+                <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
+                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold transition shadow-xs">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{formData.storeLogo ? 'Ganti Logo' : 'Unggah Foto/Logo'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        if (file.size > 2 * 1024 * 1024) {
+                          alert('Ukuran gambar maksimal 2MB.');
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = ev => {
+                          const res = ev.target?.result as string;
+                          if (res) {
+                            setFormData(prev => ({ ...prev, storeLogo: res }));
+                          }
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </label>
+
+                  {formData.storeLogo && (
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, storeLogo: '' }))}
+                      className="px-3 py-1.5 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-semibold transition"
+                    >
+                      Hapus Logo
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Format: PNG, JPG, SVG, WebP (maks. 2MB). Disarankan berlatar transparan / persegi.
+                </p>
+              </div>
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>

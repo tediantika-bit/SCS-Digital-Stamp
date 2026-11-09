@@ -83,6 +83,7 @@ export interface StoreSettings {
   storeTagline: string;
   storeAddress: string;
   storePhone: string;
+  storeLogo?: string; // Image URL or Base64 data URL for store logo
   stampThreshold: number; // default 20000
   rewardRequiredStamps: number; // default 25
   defaultRewardName: string;

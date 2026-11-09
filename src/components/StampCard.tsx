@@ -71,15 +71,23 @@ export const StampCard: React.FC<StampCardProps> = ({
         {/* Top Decorative Header Strip */}
         <div className="bg-gradient-to-r from-orange-600 via-orange-500 to-amber-600 px-5 py-4 text-white">
           <div className="flex items-start justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-xs flex items-center justify-center font-black text-white text-base tracking-wider border border-white/20">
-                SCS
-              </div>
+            <div className="flex items-center gap-3.5">
+              {settings.storeLogo ? (
+                <img
+                  src={settings.storeLogo}
+                  alt={settings.storeName}
+                  className="w-20 h-20 rounded-2xl object-contain bg-white p-2 border border-white/30 shadow-lg shrink-0"
+                />
+              ) : (
+                <div className="w-20 h-20 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center font-black text-white text-2xl tracking-wider border border-white/25 shrink-0 shadow-sm">
+                  SCS
+                </div>
+              )}
               <div>
-                <h2 className="text-base font-extrabold tracking-tight leading-tight">
+                <h2 className="text-lg sm:text-xl font-black tracking-tight leading-tight">
                   {settings.storeName}
                 </h2>
-                <p className="text-[11px] text-orange-100 font-medium tracking-wide">
+                <p className="text-[11px] text-orange-100 font-semibold tracking-wide mt-1">
                   KARTU STEMPEL DIGITAL · 25 KOTAK
                 </p>
               </div>
@@ -223,16 +231,35 @@ export const StampCard: React.FC<StampCardProps> = ({
                         className="w-full h-full flex flex-col items-center justify-center select-none"
                         style={{ transform: `rotate(${rotation}deg)` }}
                       >
-                        {/* Circular Ink Stamp */}
-                        <div className="relative w-9 h-9 sm:w-11 sm:h-11 rounded-full border-2 border-orange-600 flex flex-col items-center justify-center bg-orange-50/40 shadow-xs">
-                          <span className="text-[7px] font-black tracking-widest text-orange-700 uppercase leading-none">
-                            SCS
-                          </span>
-                          <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-orange-600 my-0.5" strokeWidth={2.5} />
-                          <span className="text-[6px] font-bold text-orange-600 leading-none">
-                            #{slotNum}
-                          </span>
-                        </div>
+                        {settings.storeLogo ? (
+                          /* Circular Ink Stamp with Custom Store Logo */
+                          <div className="relative w-9 h-9 sm:w-11 sm:h-11 rounded-full border-2 border-orange-600 flex items-center justify-center bg-white shadow-xs p-1">
+                            <img
+                              src={settings.storeLogo}
+                              alt="Logo Stempel"
+                              className="w-6 h-6 sm:w-7 sm:h-7 object-contain rounded-full"
+                            />
+                            <span className="absolute -bottom-1 px-1 py-0.2 bg-orange-600 text-white rounded-full text-[6px] sm:text-[7px] font-black tracking-tight shadow-xs leading-none">
+                              #{slotNum}
+                            </span>
+                            {isRewardSlot && (
+                              <span className="absolute -top-1 -right-1 bg-amber-500 text-white rounded-full p-0.5 shadow-xs">
+                                <Sparkles className="w-2.5 h-2.5" />
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          /* Default Circular Ink Stamp */
+                          <div className="relative w-9 h-9 sm:w-11 sm:h-11 rounded-full border-2 border-orange-600 flex flex-col items-center justify-center bg-orange-50/40 shadow-xs">
+                            <span className="text-[7px] font-black tracking-widest text-orange-700 uppercase leading-none">
+                              {settings.storeName ? settings.storeName.substring(0, 4).toUpperCase() : 'SCS'}
+                            </span>
+                            <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-orange-600 my-0.5" strokeWidth={2.5} />
+                            <span className="text-[6px] font-bold text-orange-600 leading-none">
+                              #{slotNum}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     ) : isRewardSlot ? (
                       /* Reward Special Slot */

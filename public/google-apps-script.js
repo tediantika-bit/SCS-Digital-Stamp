@@ -315,7 +315,8 @@ function saveSettingsToSheet(ss, s) {
     ["stampThreshold", s.stampThreshold || 20000],
     ["rewardRequiredStamps", s.rewardRequiredStamps || 25],
     ["defaultRewardName", s.defaultRewardName || ""],
-    ["adminPin", s.adminPin || "1234"]
+    ["adminPin", s.adminPin || "1234"],
+    ["storeLogo", s.storeLogo || ""]
   ];
   sheetS.getRange(1, 1, rows.length, 2).setValues(rows);
   sheetS.getRange(1, 1, 1, 2).setBackground("#475569").setFontColor("#ffffff").setFontWeight("bold");

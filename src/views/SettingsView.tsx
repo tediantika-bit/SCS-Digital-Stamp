@@ -18,6 +18,8 @@ import {
   Sparkles,
   Upload,
   Image,
+  Link,
+  Send,
 } from 'lucide-react';
 import { StoreSettings, TransactionCategory, Reward, Customer, Transaction, Redemption, StampLedger } from '../types';
 import { formatRupiah, formatDate } from '../utils/storage';
@@ -25,6 +27,7 @@ import {
   GOOGLE_APPS_SCRIPT_TEMPLATE,
   testGoogleSheetsConnection,
   syncAllToGoogleSheets,
+  sendSettingsToGoogleSheets,
 } from '../utils/googleSheets';
 
 interface Props {
@@ -72,6 +75,77 @@ export const SettingsView: React.FC<Props> = ({
   const [connectionStatus, setConnectionStatus] = useState<{ success: boolean; message: string } | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<{ success: boolean; message: string } | null>(null);
+  const [compressingLogo, setCompressingLogo] = useState(false);
+  const [logoSyncStatus, setLogoSyncStatus] = useState<{ success: boolean; message: string } | null>(null);
+  const [logoUrlInput, setLogoUrlInput] = useState('');
+
+  const handleLogoUpload = (file: File) => {
+    if (!file) return;
+    setCompressingLogo(true);
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const raw = ev.target?.result as string;
+      if (!raw) {
+        setCompressingLogo(false);
+        return;
+      }
+
+      // Resize and compress via Canvas to guarantee it fits inside Google Sheets 50k cell limit
+      const img = new window.Image();
+      img.onload = () => {
+        const maxDim = 180;
+        let w = img.width;
+        let h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, w, h);
+          let compressed = canvas.toDataURL('image/png');
+          // If PNG is larger than 35k chars, compress as JPEG to ensure compatibility with Google Sheets
+          if (compressed.length > 35000) {
+            compressed = canvas.toDataURL('image/jpeg', 0.85);
+          }
+          setFormData(prev => ({ ...prev, storeLogo: compressed }));
+        } else {
+          setFormData(prev => ({ ...prev, storeLogo: raw.slice(0, 35000) }));
+        }
+        setCompressingLogo(false);
+      };
+      img.onerror = () => {
+        setCompressingLogo(false);
+      };
+      img.src = raw;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSendSettingsOnly = () => {
+    if (!formData.googleSheetsScriptUrl) {
+      setLogoSyncStatus({
+        success: false,
+        message: 'URL Google Apps Script belum diatur.',
+      });
+      return;
+    }
+    sendSettingsToGoogleSheets(formData.googleSheetsScriptUrl, formData);
+    onSaveSettings(formData);
+    setLogoSyncStatus({
+      success: true,
+      message: 'Logo dan pengaturan toko berhasil dikirim ke Google Sheets!',
+    });
+    setTimeout(() => setLogoSyncStatus(null), 4000);
+  };
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -210,13 +284,51 @@ export const SettingsView: React.FC<Props> = ({
           </h3>
 
           {/* Logo Toko */}
-          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80">
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-              Logo Toko
-            </label>
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Logo Toko
+                </label>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Tampil di Header Admin, Kartu Stempel Digital pelanggan, dan stempel cap kotak.
+                </p>
+              </div>
+
+              {formData.googleSheetsScriptUrl && (
+                <button
+                  type="button"
+                  onClick={handleSendSettingsOnly}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-bold transition shadow-xs"
+                  title="Kirim Logo & Pengaturan Toko ke Google Spreadsheet"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Kirim Logo ke Spreadsheet</span>
+                </button>
+              )}
+            </div>
+
+            {logoSyncStatus && (
+              <div
+                className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 animate-in fade-in ${
+                  logoSyncStatus.success
+                    ? 'bg-emerald-100/80 border border-emerald-300 text-emerald-800'
+                    : 'bg-rose-100/80 border border-rose-300 text-rose-800'
+                }`}
+              >
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{logoSyncStatus.message}</span>
+              </div>
+            )}
+
             <div className="flex flex-col sm:flex-row items-center gap-4">
-              <div className="w-40 h-40 rounded-3xl border-2 border-dashed border-slate-300 bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-xs">
-                {formData.storeLogo ? (
+              <div className="w-36 h-36 sm:w-40 sm:h-40 rounded-3xl border-2 border-dashed border-slate-300 bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-xs relative">
+                {compressingLogo ? (
+                  <div className="flex flex-col items-center justify-center gap-1.5 text-orange-600 p-2 text-center">
+                    <RefreshCw className="w-6 h-6 animate-spin" />
+                    <span className="text-[10px] font-bold">Mengompresi...</span>
+                  </div>
+                ) : formData.storeLogo ? (
                   <img
                     src={formData.storeLogo}
                     alt="Logo Toko"
@@ -230,36 +342,30 @@ export const SettingsView: React.FC<Props> = ({
                 )}
               </div>
 
-              <div className="flex-1 space-y-2 text-center sm:text-left">
-                <p className="text-xs text-slate-600">
-                  Unggah logo toko untuk ditampilkan di Header Admin, Kartu Stempel Digital pelanggan, dan Layar Login.
-                </p>
+              <div className="flex-1 space-y-3 text-center sm:text-left w-full">
+                {/* Action Buttons */}
                 <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
-                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold transition shadow-xs">
+                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold transition shadow-xs active:scale-95">
                     <Upload className="w-3.5 h-3.5" />
-                    <span>{formData.storeLogo ? 'Ganti Logo' : 'Unggah Foto/Logo'}</span>
+                    <span>{formData.storeLogo ? 'Ganti File Foto/Logo' : 'Unggah File Foto/Logo'}</span>
                     <input
                       type="file"
                       accept="image/*"
                       className="hidden"
                       onChange={e => {
                         const file = e.target.files?.[0];
-                        if (!file) return;
-                        if (file.size > 2 * 1024 * 1024) {
-                          alert('Ukuran gambar maksimal 2MB.');
-                          return;
-                        }
-                        const reader = new FileReader();
-                        reader.onload = ev => {
-                          const res = ev.target?.result as string;
-                          if (res) {
-                            setFormData(prev => ({ ...prev, storeLogo: res }));
-                          }
-                        };
-                        reader.readAsDataURL(file);
+                        if (file) handleLogoUpload(file);
                       }}
                     />
                   </label>
+
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, storeLogo: '/icon.svg' }))}
+                    className="px-3 py-1.5 rounded-xl border border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100 text-xs font-semibold transition active:scale-95"
+                  >
+                    Pakai Logo Bawaan SCS
+                  </button>
 
                   {formData.storeLogo && (
                     <button
@@ -271,9 +377,37 @@ export const SettingsView: React.FC<Props> = ({
                     </button>
                   )}
                 </div>
-                <p className="text-[10px] text-slate-400">
-                  Format: PNG, JPG, SVG, WebP (maks. 2MB). Disarankan berlatar transparan / persegi.
-                </p>
+
+                {/* Direct URL input option */}
+                <div className="pt-2 border-t border-slate-200/60">
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">
+                    Atau Masukkan Tautan / URL Gambar (Opsional):
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      placeholder="https://contoh.com/logo-toko.png"
+                      value={logoUrlInput}
+                      onChange={e => setLogoUrlInput(e.target.value)}
+                      className="flex-1 px-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (logoUrlInput.trim()) {
+                          setFormData(prev => ({ ...prev, storeLogo: logoUrlInput.trim() }));
+                          setLogoUrlInput('');
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-xl transition"
+                    >
+                      Pasang URL
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Gambar otomatis dikompres (<strong className="text-slate-700">&lt; 35 KB</strong>) agar aman tersimpan di Google Spreadsheet tanpa melebihi batas sel.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -384,6 +518,25 @@ export const SettingsView: React.FC<Props> = ({
             <p className="text-[10px] text-slate-400 mt-1">
               Dapatkan URL ini setelah membuat Google Spreadsheet dan men-deploy Google Apps Script sebagai Web App.
             </p>
+          </div>
+
+          {/* Vercel & Multi-Device Sync Guide Banner */}
+          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 text-xs text-blue-950 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-blue-900">
+              <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+              <span>Solusi Agar Logo & Pengaturan Tersinkron ke Vercel:</span>
+            </div>
+            <ol className="list-decimal pl-4 space-y-1.5 text-[11px] text-blue-900/90 leading-relaxed font-medium">
+              <li>
+                <strong>Update Script di Spreadsheet:</strong> Buka Google Spreadsheet &gt; menu <em>Ekstensi &gt; Apps Script</em>. Salin kode terbaru dari tombol "Panduan & Kode Script", lalu klik <strong>Deploy &gt; Kelola penerapan &gt; Edit &gt; Versi: Versi Baru &gt; Deploy</strong>.
+              </li>
+              <li>
+                <strong>Kirim Logo ke Spreadsheet:</strong> Klik tombol hijau <strong>"Kirim Logo ke Spreadsheet"</strong> di bagian Logo Toko di atas agar tersimpan di Google Sheets.
+              </li>
+              <li>
+                <strong>Sinkronkan di Vercel:</strong> Buka aplikasi di Vercel, lalu di menu Pengaturan klik tombol <strong>"Tarik Data dari Spreadsheet"</strong>. Logo akan otomatis muncul di seluruh perangkat kasir dan kartu stempel pelanggan!
+              </li>
+            </ol>
           </div>
 
           {connectionStatus && (

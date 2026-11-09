@@ -10,12 +10,13 @@ const DEFAULT_SHEETS_URL = HARDCODED_GOOGLE_SHEETS_URL || (import.meta as any).e
 export const DEFAULT_SETTINGS: StoreSettings = {
   storeName: 'SCS Fotocopy',
   storeTagline: 'Pusat Fotocopy, PPOB & Pembayaran Digital',
-  storeAddress: 'Jl. Raya Utama No. 88',
-  storePhone: '0812-3456-7890',
+  storeAddress: 'BCP 2 Blok K4/5 RT.042/06 Desa Ranjeng Kec. Ciruas',
+  storePhone: '081906404851',
   stampThreshold: 20000, // Rp20.000 = 1 stamp
   rewardRequiredStamps: 25, // 25 stamps = 1 reward
   defaultRewardName: 'Minyak goreng 500 ml',
   adminPin: '1234',
+  storeLogo: '/icon.svg',
   googleSheetsScriptUrl: DEFAULT_SHEETS_URL,
 };
 

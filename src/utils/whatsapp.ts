@@ -45,9 +45,14 @@ Anda berhak menukarkan *1 ${settings.defaultRewardName}* gratis di kasir ${setti
     statusSection = `✨ Kumpulkan *${remaining} stempel lagi* untuk mendapatkan hadiah: *${settings.defaultRewardName}*!`;
   }
 
-  const noteLine = transaction.description && transaction.description !== 'Transaksi Toko' && transaction.description !== 'Umum'
-    ? `• Catatan: ${transaction.description}\n`
-    : '';
+  const serviceName = transaction.categoryName || transaction.description || 'Transaksi Toko';
+  const noteLine =
+    transaction.description &&
+    transaction.description !== serviceName &&
+    transaction.description !== 'Transaksi Toko' &&
+    transaction.description !== 'Umum'
+      ? `• Catatan: ${transaction.description}\n`
+      : '';
 
   const message = `🧾 *STRUK DIGITAL STEMPEL - ${settings.storeName.toUpperCase()}*
 ----------------------------------------
@@ -55,6 +60,7 @@ Halo Kak *${customer.name}* (ID: ${customer.customerCode}),
 Terima kasih telah bertransaksi di ${settings.storeName}!
 
 📋 *Rincian Transaksi:*
+• Layanan: ${serviceName}
 • Nominal: ${formatRupiah(transaction.amount)}
 ${noteLine}• Kode Trx: ${transaction.transactionCode}
 • Waktu: ${formatDate(transaction.createdAt)}

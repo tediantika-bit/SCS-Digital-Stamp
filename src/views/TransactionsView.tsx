@@ -25,6 +25,7 @@ export const TransactionsView: React.FC<Props> = ({
   onNewTransaction,
 }) => {
   const [search, setSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<string>(''); // YYYY-MM-DD
   const [cancellingTrx, setCancellingTrx] = useState<Transaction | null>(null);
@@ -48,9 +49,19 @@ export const TransactionsView: React.FC<Props> = ({
     const matchesSearch =
       t.customerName.toLowerCase().includes(search.toLowerCase()) ||
       t.transactionCode.toLowerCase().includes(search.toLowerCase()) ||
+      (t.categoryName && t.categoryName.toLowerCase().includes(search.toLowerCase())) ||
       (t.description && t.description.toLowerCase().includes(search.toLowerCase()));
 
     if (!matchesSearch) return false;
+    if (selectedCategory !== 'all') {
+      const catObj = categories.find(c => c.id === selectedCategory);
+      const matchesCat =
+        t.categoryId === selectedCategory ||
+        (catObj &&
+          (t.categoryName?.toLowerCase() === catObj.name.toLowerCase() ||
+            t.description?.toLowerCase().startsWith(catObj.name.toLowerCase())));
+      if (!matchesCat) return false;
+    }
     if (selectedStatus !== 'all' && t.status !== selectedStatus) return false;
     if (dateFilter && !t.createdAt.startsWith(dateFilter)) return false;
 
@@ -120,32 +131,48 @@ export const TransactionsView: React.FC<Props> = ({
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
           {/* Search */}
-          <div className="sm:col-span-5 relative">
+          <div className="sm:col-span-4 relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="Cari kode transaksi, pelanggan, catatan..."
+              placeholder="Cari kode transaksi, pelanggan, layanan..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="w-full pl-9 pr-3 py-1.5 text-xs text-slate-900 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500"
             />
           </div>
 
-          {/* Status Filter */}
+          {/* Category Filter */}
           <div className="sm:col-span-3">
+            <select
+              value={selectedCategory}
+              onChange={e => setSelectedCategory(e.target.value)}
+              className="w-full px-3 py-1.5 text-xs text-slate-800 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-white"
+            >
+              <option value="all">Semua Kategori Layanan</option>
+              {categories.map(cat => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Status Filter */}
+          <div className="sm:col-span-2">
             <select
               value={selectedStatus}
               onChange={e => setSelectedStatus(e.target.value)}
               className="w-full px-3 py-1.5 text-xs text-slate-800 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 bg-white"
             >
               <option value="all">Semua Status</option>
-              <option value="confirmed">Terkonfirmasi (Aktif)</option>
+              <option value="confirmed">Terkonfirmasi</option>
               <option value="cancelled">Dibatalkan</option>
             </select>
           </div>
 
           {/* Date Picker */}
-          <div className="sm:col-span-4">
+          <div className="sm:col-span-3">
             <input
               type="date"
               value={dateFilter}
@@ -176,7 +203,7 @@ export const TransactionsView: React.FC<Props> = ({
               <tr>
                 <th className="px-4 py-3">Kode / Waktu</th>
                 <th className="px-4 py-3">Pelanggan</th>
-                <th className="px-4 py-3">Keterangan</th>
+                <th className="px-4 py-3">Kategori & Keterangan</th>
                 <th className="px-4 py-3 text-right">Nominal</th>
                 <th className="px-4 py-3 text-center">Stempel</th>
                 <th className="px-4 py-3 text-center">Status</th>
@@ -213,7 +240,7 @@ export const TransactionsView: React.FC<Props> = ({
                       </td>
 
                       <td className="px-4 py-3">
-                        <span className="inline-block px-2.5 py-0.5 rounded-lg text-[11px] font-medium bg-slate-100 text-slate-700 max-w-xs truncate">
+                        <span className="inline-block px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-orange-50 text-orange-800 border border-orange-200/60 max-w-xs truncate">
                           {trx.description || trx.categoryName || 'Transaksi Toko'}
                         </span>
                       </td>

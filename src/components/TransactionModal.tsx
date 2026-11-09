@@ -29,9 +29,13 @@ export const TransactionModal: React.FC<Props> = ({
   onClose,
   customer,
   currentBalance,
+  categories = [],
   settings,
   onSubmit,
 }) => {
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
+    categories[0]?.id || 'cat-1'
+  );
   const [rawAmount, setRawAmount] = useState('');
   const [description, setDescription] = useState('');
   const [sendWA, setSendWA] = useState(!!customer.phone);
@@ -39,6 +43,7 @@ export const TransactionModal: React.FC<Props> = ({
 
   if (!isOpen) return null;
 
+  const selectedCategory = categories.find(c => c.id === selectedCategoryId) || categories[0];
   const numericAmount = parseInt(rawAmount.replace(/\D/g, ''), 10) || 0;
   const stampsEarned = calculateStampsFromAmount(numericAmount, settings.stampThreshold);
   const balanceAfter = currentBalance + stampsEarned;
@@ -64,14 +69,20 @@ export const TransactionModal: React.FC<Props> = ({
 
     sound.playStamp();
 
+    const catId = selectedCategory?.id || 'cat-1';
+    const catName = selectedCategory?.name || 'Transaksi Toko';
+    const descText = description.trim()
+      ? `${catName} - ${description.trim()}`
+      : catName;
+
     const createdTrx = onSubmit({
       customerId: customer.id,
       customerName: customer.name,
-      categoryId: 'cat-general',
-      categoryName: 'Transaksi Toko',
+      categoryId: catId,
+      categoryName: catName,
       amount: numericAmount,
       stampEarned: stampsEarned,
-      description: description.trim() || 'Transaksi Toko',
+      description: descText,
     });
 
     if (sendWA) {
@@ -80,12 +91,12 @@ export const TransactionModal: React.FC<Props> = ({
         transactionCode: `TRX-${Date.now().toString(36).toUpperCase()}`,
         customerId: customer.id,
         customerName: customer.name,
-        categoryId: 'cat-general',
-        categoryName: 'Transaksi Toko',
+        categoryId: catId,
+        categoryName: catName,
         amount: numericAmount,
         stampEarned: stampsEarned,
         status: 'confirmed',
-        description: description.trim() || 'Transaksi Toko',
+        description: descText,
         createdBy: 'Admin SCS',
         createdAt: new Date().toISOString(),
       };
@@ -121,6 +132,34 @@ export const TransactionModal: React.FC<Props> = ({
 
         <form onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
+
+          {/* Kategori Layanan */}
+          {categories.length > 0 && (
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                Kategori Layanan
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                {categories.map(cat => {
+                  const isSelected = cat.id === selectedCategory?.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setSelectedCategoryId(cat.id)}
+                      className={`px-2.5 py-2 rounded-xl border text-xs font-bold transition text-left truncate ${
+                        isSelected
+                          ? 'bg-orange-600 border-orange-600 text-white shadow-xs'
+                          : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      {cat.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Amount Input */}
           <div>

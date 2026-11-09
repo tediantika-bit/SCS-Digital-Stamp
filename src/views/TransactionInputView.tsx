@@ -26,6 +26,7 @@ interface Props {
 
 export const TransactionInputView: React.FC<Props> = ({
   customers,
+  categories = [],
   settings,
   ledgers,
   onSubmitTransaction,
@@ -34,6 +35,9 @@ export const TransactionInputView: React.FC<Props> = ({
 }) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>(
     preSelectedCustomer?.id || customers[0]?.id || ''
+  );
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
+    categories[0]?.id || 'cat-1'
   );
   const [customerSearch, setCustomerSearch] = useState('');
   const [rawAmount, setRawAmount] = useState('');
@@ -47,6 +51,7 @@ export const TransactionInputView: React.FC<Props> = ({
   } | null>(null);
 
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
+  const selectedCategory = categories.find(c => c.id === selectedCategoryId) || categories[0];
   const currentBalance = selectedCustomer ? getCustomerStampBalance(selectedCustomer.id, ledgers) : 0;
 
   const numericAmount = parseInt(rawAmount.replace(/\D/g, ''), 10) || 0;
@@ -73,14 +78,20 @@ export const TransactionInputView: React.FC<Props> = ({
 
     sound.playStamp();
 
+    const catId = selectedCategory?.id || 'cat-1';
+    const catName = selectedCategory?.name || 'Transaksi Toko';
+    const descText = description.trim()
+      ? `${catName} - ${description.trim()}`
+      : catName;
+
     const createdTrx = onSubmitTransaction({
       customerId: selectedCustomer.id,
       customerName: selectedCustomer.name,
-      categoryId: 'cat-general',
-      categoryName: 'Transaksi Toko',
+      categoryId: catId,
+      categoryName: catName,
       amount: numericAmount,
       stampEarned: stampsEarned,
-      description: description.trim() || 'Transaksi Toko',
+      description: descText,
     });
 
     const fallbackTrx: Transaction = createdTrx || {
@@ -88,12 +99,12 @@ export const TransactionInputView: React.FC<Props> = ({
       transactionCode: `TRX-${Date.now().toString(36).toUpperCase()}`,
       customerId: selectedCustomer.id,
       customerName: selectedCustomer.name,
-      categoryId: 'cat-general',
-      categoryName: 'Transaksi Toko',
+      categoryId: catId,
+      categoryName: catName,
       amount: numericAmount,
       stampEarned: stampsEarned,
       status: 'confirmed',
-      description: description.trim() || 'Transaksi Toko',
+      description: descText,
       createdBy: 'Admin SCS',
       createdAt: new Date().toISOString(),
     };
@@ -288,7 +299,7 @@ export const TransactionInputView: React.FC<Props> = ({
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                 <Calculator className="w-4 h-4 text-orange-600" />
-                2. Masukkan Nominal Transaksi
+                2. Pilih Kategori & Nominal Transaksi
               </span>
               {selectedCustomer && (
                 <span className="text-xs font-bold text-orange-700 bg-orange-100/70 px-2.5 py-0.5 rounded-full">
@@ -296,6 +307,34 @@ export const TransactionInputView: React.FC<Props> = ({
                 </span>
               )}
             </div>
+
+            {/* Kategori Layanan */}
+            {categories.length > 0 && (
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Kategori Layanan
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                  {categories.map(cat => {
+                    const isSelected = cat.id === selectedCategory?.id;
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => setSelectedCategoryId(cat.id)}
+                        className={`px-2.5 py-2 rounded-xl border text-xs font-bold transition text-left truncate ${
+                          isSelected
+                            ? 'bg-orange-600 border-orange-600 text-white shadow-xs'
+                            : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        {cat.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Nominal Transaksi */}
             <div>

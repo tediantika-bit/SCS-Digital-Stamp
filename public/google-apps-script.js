@@ -133,18 +133,21 @@ function doPost(e) {
       var sheetCust = ss.getSheetByName("Pelanggan") || ss.insertSheet("Pelanggan");
       var c = data.customer;
       var statusHadiah = (data.balance >= 25) ? "Siap Klaim Hadiah" : "Belum Siap";
+      var safePhone = (c.phone && String(c.phone).trim() !== "-" && String(c.phone).indexOf("ERROR") === -1)
+        ? "'" + String(c.phone).trim().replace(/^'/, "")
+        : "";
       
       var existingRow = findCustomerRow(sheetCust, c.id);
       if (existingRow > 0) {
         sheetCust.getRange(existingRow, 2).setValue(c.name);
-        sheetCust.getRange(existingRow, 3).setValue(c.phone || "-");
+        sheetCust.getRange(existingRow, 3).setValue(safePhone);
         sheetCust.getRange(existingRow, 4).setValue(data.balance || 0);
         sheetCust.getRange(existingRow, 5).setValue(statusHadiah);
       } else {
         sheetCust.appendRow([
           c.customerCode || c.id,
           c.name,
-          c.phone || "-",
+          safePhone,
           data.balance || 0,
           statusHadiah,
           c.createdAt,
@@ -195,10 +198,14 @@ function doPost(e) {
       if (data.customers && data.customers.length > 0) {
         var rowsP = data.customers.map(function(item) {
           var isReady = item.balance >= 25 ? "Siap Klaim Hadiah" : "Belum Siap";
+          var rawP = item.customer.phone;
+          var safeP = (rawP && String(rawP).trim() !== "-" && String(rawP).indexOf("ERROR") === -1)
+            ? "'" + String(rawP).trim().replace(/^'/, "")
+            : "";
           return [
             item.customer.customerCode,
             item.customer.name,
-            item.customer.phone || "-",
+            safeP,
             item.balance,
             isReady,
             item.customer.createdAt,

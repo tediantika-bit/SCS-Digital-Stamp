@@ -29,6 +29,7 @@ export const DEFAULT_CATEGORIES: TransactionCategory[] = [
   { id: 'cat-7', name: 'BTN', status: 'active' },
   { id: 'cat-8', name: 'Tarik tunai', status: 'active' },
   { id: 'cat-9', name: 'Top Up Game Online', status: 'active' },
+  { id: 'cat-10', name: 'Lainnya', status: 'active' },
 ];
 
 export const DEFAULT_REWARDS: Reward[] = [
@@ -126,10 +127,12 @@ export function loadAppData(): AppData {
       idMap[c.id] = canonicalId;
       idMap[c.customerCode] = canonicalId;
       if (c.name) nameMap[c.name.toLowerCase().trim()] = canonicalId;
+      const cleanedPhone = sanitizePhone(c.phone);
       return {
         ...c,
         id: canonicalId,
         customerCode: canonicalId,
+        phone: cleanedPhone || undefined,
       };
     });
 
@@ -173,9 +176,15 @@ export function loadAppData(): AppData {
       customerId: idMap[r.customerId] || (r.customerName ? nameMap[r.customerName.toLowerCase().trim()] : undefined) || r.customerId,
     }));
 
+    const parsedCategories: TransactionCategory[] = rawCategories ? JSON.parse(rawCategories) : DEFAULT_CATEGORIES;
+    // Ensure cat-10 (Lainnya) exists in categories
+    if (!parsedCategories.some(c => c.name.toLowerCase().trim() === 'lainnya')) {
+      parsedCategories.push({ id: 'cat-10', name: 'Lainnya', status: 'active' });
+    }
+
     return {
       settings,
-      categories: rawCategories ? JSON.parse(rawCategories) : DEFAULT_CATEGORIES,
+      categories: parsedCategories,
       customers: normalizedCustomers,
       transactions: normalizedTransactions,
       ledgers: normalizedLedgers,
@@ -225,10 +234,27 @@ export function resetAllData(): AppData {
   return initialData;
 }
 
-// Business Rules & Calculations
-export function calculateStampsFromAmount(amount: number, threshold: number = 20000): number {
+// Business Rules & Calculations:
+// 1. Kategori 'Lainnya': Berlaku kelipatan (misal Rp45.000 / Rp20.000 = 2 stempel)
+// 2. Kategori lainnya (Pulsa, Token, Transfer, dll): Min Rp20.000 = 1 stempel (tidak berlaku kelipatan)
+export function calculateStampsFromAmount(
+  amount: number,
+  threshold: number = 20000,
+  categoryIdentifier?: string
+): number {
   if (!amount || amount < threshold) return 0;
-  return Math.floor(amount / threshold);
+  
+  const isLainnya = categoryIdentifier && (
+    categoryIdentifier.toLowerCase().trim() === 'lainnya' ||
+    categoryIdentifier.toLowerCase().trim() === 'cat-10'
+  );
+
+  if (isLainnya) {
+    return Math.floor(amount / threshold);
+  }
+
+  // Kategori transaksi standar: 1 transaksi = 1 stempel jika >= threshold
+  return 1;
 }
 
 export function getCustomerStampBalance(
@@ -280,3 +306,42 @@ export function generateQrToken(name: string): string {
   const rand = Math.random().toString(36).substring(2, 10);
   return `scs_${clean}_${rand}`;
 }
+
+/**
+ * Cleans phone numbers and strips Google Sheets formula errors (#ERROR!, #VALUE!, "-", etc.)
+ */
+export function sanitizePhone(phone?: string | null): string {
+  if (!phone) return '';
+  let str = String(phone).trim();
+  // Remove leading apostrophe if present from Google Sheets plain text prefix
+  if (str.startsWith("'")) {
+    str = str.substring(1).trim();
+  }
+  const upper = str.toUpperCase();
+  if (
+    !str ||
+    str === '-' ||
+    str === '=' ||
+    str === '+' ||
+    upper.startsWith('#') ||
+    upper.includes('ERROR') ||
+    upper === 'NAN' ||
+    upper === 'UNDEFINED' ||
+    upper === 'NULL'
+  ) {
+    return '';
+  }
+  // Convert +62 prefix to 0 so Google Sheets never interprets + as formula
+  if (str.startsWith('+62')) {
+    str = '0' + str.substring(3).trim();
+  } else if (str.startsWith('628')) {
+    str = '0' + str.substring(2).trim();
+  } else if (str.startsWith('8') && /^\d+$/.test(str) && str.length >= 9) {
+    // Restore leading 0 if Google Sheets stripped it from numeric cell
+    str = '0' + str;
+  }
+  // Keep only digits (remove spaces/dashes so Sheets never parses subtraction)
+  const digitsOnly = str.replace(/[^0-9]/g, '');
+  return digitsOnly;
+}
+

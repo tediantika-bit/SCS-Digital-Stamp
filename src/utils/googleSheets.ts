@@ -1,5 +1,5 @@
 import { Customer, Transaction, Redemption, StoreSettings, StampLedger } from '../types';
-import { getCustomerStampBalance, formatRupiah, formatDate } from './storage';
+import { getCustomerStampBalance, formatRupiah, formatDate, sanitizePhone } from './storage';
 
 /**
  * Ready-to-copy Google Apps Script Code for Google Spreadsheet
@@ -138,18 +138,21 @@ function doPost(e) {
       var sheetCust = ss.getSheetByName("Pelanggan") || ss.insertSheet("Pelanggan");
       var c = data.customer;
       var statusHadiah = (data.balance >= 25) ? "Siap Klaim Hadiah" : "Belum Siap";
+      var safePhone = (c.phone && String(c.phone).trim() !== "-" && String(c.phone).indexOf("ERROR") === -1)
+        ? "'" + String(c.phone).trim().replace(/^'/, "")
+        : "";
       
       var existingRow = findCustomerRow(sheetCust, c.id);
       if (existingRow > 0) {
         sheetCust.getRange(existingRow, 2).setValue(c.name);
-        sheetCust.getRange(existingRow, 3).setValue(c.phone || "-");
+        sheetCust.getRange(existingRow, 3).setValue(safePhone);
         sheetCust.getRange(existingRow, 4).setValue(data.balance || 0);
         sheetCust.getRange(existingRow, 5).setValue(statusHadiah);
       } else {
         sheetCust.appendRow([
           c.customerCode || c.id,
           c.name,
-          c.phone || "-",
+          safePhone,
           data.balance || 0,
           statusHadiah,
           c.createdAt,
@@ -200,10 +203,14 @@ function doPost(e) {
       if (data.customers && data.customers.length > 0) {
         var rowsP = data.customers.map(function(item) {
           var isReady = item.balance >= 25 ? "Siap Klaim Hadiah" : "Belum Siap";
+          var rawP = item.customer.phone;
+          var safeP = (rawP && String(rawP).trim() !== "-" && String(rawP).indexOf("ERROR") === -1)
+            ? "'" + String(rawP).trim().replace(/^'/, "")
+            : "";
           return [
             item.customer.customerCode,
             item.customer.name,
-            item.customer.phone || "-",
+            safeP,
             item.balance,
             isReady,
             item.customer.createdAt,
@@ -508,11 +515,18 @@ export async function syncAllToGoogleSheets(
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
 
-  const customerItems = customers.map(c => ({
-    customer: c,
-    balance: getCustomerStampBalance(c.id, ledgers),
-    cardUrl: `${origin}/#card=${c.qrToken}`,
-  }));
+  const customerItems = customers.map(c => {
+    const cleanP = sanitizePhone(c.phone);
+    return {
+      customer: {
+        ...c,
+        // Send "'08..." if phone exists, or " " (single space) so existing Apps Script (c.phone || "-") doesn't write "-" which causes #ERROR! in Google Sheets
+        phone: cleanP ? `'${cleanP}` : ' ',
+      },
+      balance: getCustomerStampBalance(c.id, ledgers),
+      cardUrl: `${origin}/#card=${c.qrToken}`,
+    };
+  });
 
   const payload = {
     action: 'sync_all',
@@ -584,9 +598,14 @@ export function sendCustomerToGoogleSheets(
   if (!scriptUrl) return;
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const cleanP = sanitizePhone(customer.phone);
   postToGoogleSheets(scriptUrl, {
     action: 'add_customer',
-    customer,
+    customer: {
+      ...customer,
+      // Prevent Google Apps Script (c.phone || "-") from writing "-" which causes #ERROR! in Google Sheets
+      phone: cleanP ? `'${cleanP}` : ' ',
+    },
     balance,
     cardUrl: `${origin}/#card=${customer.qrToken}`,
   });
@@ -684,15 +703,24 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
     const rawCustomers: any[] = json.customers || [];
     const customers: Customer[] = rawCustomers.map((c: any) => {
       const code = String(c.customerCode || c.id || '').trim();
-      return {
+      const rawPhoneStr = String(c.phone || '').trim();
+      const cleanedPhone = sanitizePhone(rawPhoneStr);
+      const custObj: Customer = {
         id: code,
         customerCode: code,
         name: String(c.name || 'Pelanggan').trim(),
-        phone: c.phone && c.phone !== '-' ? String(c.phone).trim() : '',
+        phone: cleanedPhone || undefined,
         qrToken: c.cardUrl && c.cardUrl.includes('#card=') ? c.cardUrl.split('#card=')[1] : code,
         status: 'active',
         createdAt: c.createdAt || new Date().toISOString(),
       };
+
+      // Auto-repair Google Sheets cell if it currently contains #ERROR! or formula error
+      if (rawPhoneStr.startsWith('#') || rawPhoneStr.toUpperCase().includes('ERROR')) {
+        sendCustomerToGoogleSheets(scriptUrl, custObj, Number(c.balance) || 0);
+      }
+
+      return custObj;
     });
 
     // Helper to resolve canonical customer ID (matches by id/customerCode or exact name)

@@ -286,7 +286,7 @@ export const StampCard: React.FC<StampCardProps> = ({
 
             {/* Micro info note */}
             <div className="mt-3 text-center text-[10px] text-slate-500">
-              Setiap transaksi Rp{new Intl.NumberFormat('id-ID').format(settings.stampThreshold)} = 1 stempel.
+              Setiap 1 transaksi minimal Rp{new Intl.NumberFormat('id-ID').format(settings.stampThreshold)} mendapatkan 1 stempel.
             </div>
           </div>
         )}

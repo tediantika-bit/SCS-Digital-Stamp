@@ -156,7 +156,7 @@ export const SettingsView: React.FC<Props> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                Ambang Nominal Per 1 Stempel (Rp)
+                Minimal Nominal Transaksi Per 1 Stempel (Rp)
               </label>
               <input
                 type="number"
@@ -166,7 +166,9 @@ export const SettingsView: React.FC<Props> = ({
                 onChange={e => setFormData({ ...formData, stampThreshold: parseInt(e.target.value, 10) || 20000 })}
                 className="w-full px-3.5 py-2 text-xs font-bold text-slate-900 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 tabular-nums"
               />
-              <p className="text-[10px] text-slate-500 mt-1">Standar fisik: Rp20.000 = 1 stempel.</p>
+              <p className="text-[10px] text-slate-500 mt-1">
+                9 layanan PPOB: Min. Rp20.000 = 1 stempel/transaksi. Kategori <strong>Lainnya</strong>: berlaku kelipatan Rp20.000.
+              </p>
             </div>
 
             <div>

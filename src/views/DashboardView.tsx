@@ -307,7 +307,7 @@ export const DashboardView: React.FC<Props> = ({
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-            <span>Aturan: 1 Stempel = Kelipatan {formatRupiah(settings.stampThreshold)}</span>
+            <span>Aturan: 1 Transaksi (Min. {formatRupiah(settings.stampThreshold)}) = 1 Stempel</span>
             <button
               onClick={() => onQuickTransaction()}
               className="text-xs font-bold text-orange-600 hover:text-orange-700"

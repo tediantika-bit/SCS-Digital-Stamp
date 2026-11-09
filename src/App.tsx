@@ -37,6 +37,7 @@ import {
   resetAllData,
   getCustomerStampBalance,
   generateId,
+  sanitizePhone,
 } from './utils/storage';
 import { sound } from './utils/audio';
 import {
@@ -174,16 +175,20 @@ export default function App() {
           const customerMap = new Map<string, Customer>();
           prev.customers.forEach(c => {
             const key = c.customerCode || c.id;
-            customerMap.set(key, { ...c, id: key, customerCode: key });
+            const cleanP = sanitizePhone(c.phone);
+            customerMap.set(key, { ...c, id: key, customerCode: key, phone: cleanP || undefined });
           });
           pulled.customers.forEach(c => {
             const key = c.customerCode || c.id;
             const existing = customerMap.get(key);
+            const cleanRemoteP = sanitizePhone(c.phone);
+            const cleanExistingP = sanitizePhone(existing?.phone);
             customerMap.set(key, {
               ...existing,
               ...c,
               id: key,
               customerCode: key,
+              phone: cleanRemoteP || cleanExistingP || undefined,
               qrToken: c.qrToken && c.qrToken !== key ? c.qrToken : existing?.qrToken || c.qrToken,
             });
           });

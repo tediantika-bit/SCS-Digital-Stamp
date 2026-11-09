@@ -44,8 +44,9 @@ export const TransactionModal: React.FC<Props> = ({
   if (!isOpen) return null;
 
   const selectedCategory = categories.find(c => c.id === selectedCategoryId) || categories[0];
+  const isLainnya = selectedCategory?.name?.toLowerCase().trim() === 'lainnya' || selectedCategory?.id === 'cat-10';
   const numericAmount = parseInt(rawAmount.replace(/\D/g, ''), 10) || 0;
-  const stampsEarned = calculateStampsFromAmount(numericAmount, settings.stampThreshold);
+  const stampsEarned = calculateStampsFromAmount(numericAmount, settings.stampThreshold, selectedCategory?.name || selectedCategoryId);
   const balanceAfter = currentBalance + stampsEarned;
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -167,8 +168,10 @@ export const TransactionModal: React.FC<Props> = ({
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                 Nominal Transaksi (Rp)
               </label>
-              <span className="text-[11px] text-slate-500">
-                Kelipatan {formatRupiah(settings.stampThreshold)} = 1 stempel
+              <span className="text-[11px] font-semibold text-orange-600">
+                {isLainnya
+                  ? `Kelipatan ${formatRupiah(settings.stampThreshold)} = 1 stempel`
+                  : `Min. ${formatRupiah(settings.stampThreshold)} = 1 stempel / transaksi`}
               </span>
             </div>
 
@@ -187,7 +190,7 @@ export const TransactionModal: React.FC<Props> = ({
 
             {/* Quick Amount Buttons */}
             <div className="flex flex-wrap gap-1.5 mt-2">
-              {[20000, 50000, 100000, 200000, 500000].map(amt => (
+              {[20000, 30000, 45000, 60000, 100000, 200000].map(amt => (
                 <button
                   type="button"
                   key={amt}
@@ -203,9 +206,11 @@ export const TransactionModal: React.FC<Props> = ({
           {/* Real-time Stamp Calculation Preview Card */}
           <div className="p-4 rounded-2xl bg-gradient-to-r from-orange-50/80 to-amber-50/80 border border-orange-200">
             <div className="flex items-center justify-between text-xs text-slate-600 mb-2">
-              <span className="font-semibold">Kalkulasi Otomatis Stempel:</span>
-              <span className="font-mono text-[11px] text-slate-500">
-                {numericAmount > 0 ? `${formatRupiah(numericAmount)} ÷ ${formatRupiah(settings.stampThreshold)}` : 'Rp0'}
+              <span className="font-semibold">Perolehan Stempel Transaksi:</span>
+              <span className="font-semibold text-[11px] text-orange-700">
+                {isLainnya
+                  ? `Kategori 'Lainnya' Berlaku Kelipatan (Kelipatan ${formatRupiah(settings.stampThreshold)})`
+                  : `Min. ${formatRupiah(settings.stampThreshold)} = +1 Stempel`}
               </span>
             </div>
 
@@ -222,7 +227,7 @@ export const TransactionModal: React.FC<Props> = ({
 
               <div className="bg-white/80 p-2 rounded-xl">
                 <p className="text-[10px] text-slate-500 uppercase font-semibold">Total Stempel</p>
-                <p className={`text-base font-extrabold tabular-nums ${balanceAfter >= 25 ? 'text-emerald-600' : 'text-slate-800'}`}>
+                <p className={`text-base font-extrabold tabular-nums ${balanceAfter >= settings.rewardRequiredStamps ? 'text-emerald-600' : 'text-slate-800'}`}>
                   {balanceAfter}
                 </p>
               </div>

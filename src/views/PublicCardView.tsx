@@ -5,7 +5,7 @@ import { PWAInstallButton } from '../components/PWAInstallButton';
 import { WhatsAppButton } from '../components/WhatsAppButton';
 import { sendWhatsAppMessage } from '../utils/whatsapp';
 import { Store, Phone, MapPin, Sparkles, ChevronRight, History, ShieldCheck, ArrowLeft, QrCode } from 'lucide-react';
-import { formatDate } from '../utils/storage';
+import { formatDate, formatRupiah } from '../utils/storage';
 
 interface Props {
   customer: Customer;
@@ -219,10 +219,9 @@ export const PublicCardView: React.FC<Props> = ({
                 Ketentuan Program Stempel:
               </h4>
               <ul className="space-y-1.5 text-slate-600 list-disc list-inside">
-                <li>Setiap transaksi minimal Rp20.000 mendapatkan 1 stempel.</li>
-                <li>Setiap kelipatan Rp20.000 mendapatkan tambahan 1 stempel (contoh: Rp60.000 = 3 stempel).</li>
-                <li>Berlaku untuk pulsa, token listrik, PLN pascabayar, e-money, transfer, angsuran, BTN, tarik tunai, dan game online.</li>
-                <li>25 stempel dapat ditukarkan dengan <strong>Minyak goreng 500 ml</strong>.</li>
+                <li>Setiap 1 kali transaksi layanan (Pulsa, Token listrik, PLN Pascabayar, Top Up E-Money, Transfer, Angsuran, BTN, Tarik tunai, Top Up Game Online) minimal <strong>{formatRupiah(settings.stampThreshold)}</strong> mendapatkan <strong>1 stempel</strong> (tidak berlaku kelipatan).</li>
+                <li>Khusus kategori <strong>Lainnya</strong> (Fotocopy, ATK, Cetak, dll), berlaku kelipatan setiap <strong>{formatRupiah(settings.stampThreshold)}</strong> = 1 stempel (contoh: Rp45.000 = 2 stempel).</li>
+                <li>{settings.rewardRequiredStamps} stempel dapat ditukarkan dengan <strong>{settings.defaultRewardName}</strong>.</li>
                 <li>Sisa stempel tidak hangus dan otomatis dibawa ke lembar stempel periode berikutnya.</li>
               </ul>
             </div>

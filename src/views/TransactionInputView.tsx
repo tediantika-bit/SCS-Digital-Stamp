@@ -55,7 +55,8 @@ export const TransactionInputView: React.FC<Props> = ({
   const currentBalance = selectedCustomer ? getCustomerStampBalance(selectedCustomer.id, ledgers) : 0;
 
   const numericAmount = parseInt(rawAmount.replace(/\D/g, ''), 10) || 0;
-  const stampsEarned = calculateStampsFromAmount(numericAmount, settings.stampThreshold);
+  const isLainnya = selectedCategory?.name?.toLowerCase().trim() === 'lainnya' || selectedCategory?.id === 'cat-10';
+  const stampsEarned = calculateStampsFromAmount(numericAmount, settings.stampThreshold, selectedCategory?.name || selectedCategoryId);
   const balanceAfter = currentBalance + stampsEarned;
 
   const filteredCustomers = customers.filter(c =>
@@ -342,8 +343,10 @@ export const TransactionInputView: React.FC<Props> = ({
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                   Nominal Transaksi (Rp)
                 </label>
-                <span className="text-[11px] text-slate-500">
-                  Minimal {formatRupiah(settings.stampThreshold)} = 1 stempel
+                <span className="text-[11px] font-semibold text-orange-600">
+                  {isLainnya
+                    ? `Kelipatan ${formatRupiah(settings.stampThreshold)} = 1 stempel`
+                    : `Min. ${formatRupiah(settings.stampThreshold)} = 1 stempel / transaksi`}
                 </span>
               </div>
 
@@ -364,7 +367,7 @@ export const TransactionInputView: React.FC<Props> = ({
 
               {/* Quick Preset Buttons */}
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 mt-2">
-                {[20000, 40000, 60000, 100000, 200000, 500000].map(amt => (
+                {[20000, 30000, 45000, 60000, 100000, 200000].map(amt => (
                   <button
                     key={amt}
                     type="button"
@@ -380,9 +383,11 @@ export const TransactionInputView: React.FC<Props> = ({
             {/* Real-time Calculation Box */}
             <div className="p-4 rounded-2xl bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200/80">
               <div className="flex items-center justify-between text-xs text-slate-600 mb-2">
-                <span className="font-bold">Hasil Kalkulasi Stempel Otomatis:</span>
-                <span className="font-mono text-[11px] text-slate-500">
-                  {numericAmount > 0 ? `${formatRupiah(numericAmount)} ÷ Rp20.000` : 'Rp0'}
+                <span className="font-bold">Perolehan Stempel Transaksi:</span>
+                <span className="font-semibold text-[11px] text-orange-700">
+                  {isLainnya
+                    ? `Kategori 'Lainnya' Berlaku Kelipatan (Kelipatan ${formatRupiah(settings.stampThreshold)})`
+                    : `Min. ${formatRupiah(settings.stampThreshold)} = +1 Stempel`}
                 </span>
               </div>
 
@@ -399,16 +404,22 @@ export const TransactionInputView: React.FC<Props> = ({
 
                 <div className="bg-white/80 p-2.5 rounded-xl border border-orange-100">
                   <p className="text-[10px] text-slate-500 uppercase font-semibold">Total Stempel</p>
-                  <p className={`text-lg font-black tabular-nums ${balanceAfter >= 25 ? 'text-emerald-600' : 'text-slate-900'}`}>
+                  <p className={`text-lg font-black tabular-nums ${balanceAfter >= settings.rewardRequiredStamps ? 'text-emerald-600' : 'text-slate-900'}`}>
                     {balanceAfter}
                   </p>
                 </div>
               </div>
 
-              {balanceAfter >= 25 && (
+              {numericAmount > 0 && stampsEarned === 0 && (
+                <p className="text-[11px] text-amber-700 mt-2.5 text-center font-semibold">
+                  Transaksi di bawah {formatRupiah(settings.stampThreshold)} tidak mendapatkan stempel.
+                </p>
+              )}
+
+              {balanceAfter >= settings.rewardRequiredStamps && (
                 <div className="mt-3 p-2 rounded-xl bg-emerald-100 text-emerald-900 text-xs font-bold flex items-center justify-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Pelanggan ini langsung berhak atas Minyak Goreng 500ml!</span>
+                  <span>Pelanggan ini langsung berhak atas {settings.defaultRewardName}!</span>
                 </div>
               )}
             </div>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, UserPlus, UserCheck, Phone, User, FileText } from 'lucide-react';
 import { Customer, StoreSettings } from '../types';
-import { generateQrToken } from '../utils/storage';
+import { generateQrToken, sanitizePhone } from '../utils/storage';
 import { WhatsAppIcon } from './WhatsAppButton';
 import { sendWhatsAppMessage, getCustomerCardUrl } from '../utils/whatsapp';
 
@@ -24,7 +24,7 @@ export const CustomerModal: React.FC<Props> = ({
 }) => {
   const isEditing = !!customer;
   const [name, setName] = useState(customer?.name || '');
-  const [phone, setPhone] = useState(customer?.phone || '');
+  const [phone, setPhone] = useState(() => sanitizePhone(customer?.phone));
   const [notes, setNotes] = useState(customer?.notes || '');
   const [status, setStatus] = useState<'active' | 'inactive'>(customer?.status || 'active');
   const [sendWelcomeWA, setSendWelcomeWA] = useState(!isEditing);
@@ -35,11 +35,13 @@ export const CustomerModal: React.FC<Props> = ({
     e.preventDefault();
     if (!name.trim()) return;
 
+    const cleanPhone = sanitizePhone(phone);
+
     if (isEditing && customer) {
       onSave({
         ...customer,
         name: name.trim(),
-        phone: phone.trim() || undefined,
+        phone: cleanPhone || undefined,
         notes: notes.trim() || undefined,
         status,
       });
@@ -50,7 +52,7 @@ export const CustomerModal: React.FC<Props> = ({
         id: customerCode,
         customerCode: customerCode,
         name: name.trim(),
-        phone: phone.trim() || undefined,
+        phone: cleanPhone || undefined,
         notes: notes.trim() || undefined,
         qrToken: generateQrToken(name),
         status: 'active',
@@ -66,8 +68,8 @@ Halo Kak *${newCustomer.name}*,
 Kartu stempel digital Anda telah berhasil diaktifkan!
 
 🔖 *ID Pelanggan:* ${newCustomer.customerCode}
-🎁 *Hadiah Utama:* ${settings.defaultRewardName} (per 25 stempel)
-✨ *Ketentuan:* Setiap transaksi kelipatan Rp${new Intl.NumberFormat('id-ID').format(settings.stampThreshold)} otomatis mendapatkan 1 stempel.
+🎁 *Hadiah Utama:* ${settings.defaultRewardName} (per ${settings.rewardRequiredStamps} stempel)
+✨ *Ketentuan:* Setiap 1 kali transaksi layanan minimal Rp${new Intl.NumberFormat('id-ID').format(settings.stampThreshold)} otomatis mendapatkan 1 stempel.
 
 Lihat kartu stempel digital Anda:
 ${cardUrl}

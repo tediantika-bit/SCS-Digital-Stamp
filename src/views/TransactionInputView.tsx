@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Stamp, Search, Scan, Plus, CheckCircle2, ArrowRight, User, Calculator, AlertCircle, RefreshCw, Sparkles, Phone, Banknote, QrCode, Clock } from 'lucide-react';
-import { Customer, TransactionCategory, StoreSettings, StampLedger, Transaction, PaymentMethod } from '../types';
+import { Stamp, Search, Scan, Plus, CheckCircle2, ArrowRight, User, Calculator, AlertCircle, RefreshCw, Sparkles, Phone, Banknote, QrCode } from 'lucide-react';
+import { Customer, TransactionCategory, StoreSettings, StampLedger, Transaction } from '../types';
 import { calculateStampsFromAmount, formatRupiah, getCustomerStampBalance } from '../utils/storage';
 import { sound } from '../utils/audio';
 import { WhatsAppButton } from '../components/WhatsAppButton';
@@ -18,7 +18,7 @@ interface Props {
     categoryName: string;
     amount: number;
     stampEarned: number;
-    paymentMethod: PaymentMethod;
+    paymentMethod: 'cash' | 'qris';
     description: string;
   }) => Transaction | void;
   onViewCustomerCard: (customer: Customer) => void;
@@ -42,7 +42,7 @@ export const TransactionInputView: React.FC<Props> = ({
   );
   const [customerSearch, setCustomerSearch] = useState('');
   const [rawAmount, setRawAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'qris'>('cash');
   const [description, setDescription] = useState('');
   const [lastSuccess, setLastSuccess] = useState<{
     customer: Customer;
@@ -59,8 +59,7 @@ export const TransactionInputView: React.FC<Props> = ({
   const numericAmount = parseInt(rawAmount.replace(/\D/g, ''), 10) || 0;
   const isLainnya = selectedCategory?.name?.toLowerCase().trim() === 'lainnya' || selectedCategory?.id === 'cat-10';
   const stampsEarned = calculateStampsFromAmount(numericAmount, settings.stampThreshold, selectedCategory?.name || selectedCategoryId);
-  const isHutang = paymentMethod === 'hutang';
-  const balanceAfter = isHutang ? currentBalance : currentBalance + stampsEarned;
+  const balanceAfter = currentBalance + stampsEarned;
 
   const filteredCustomers = customers.filter(c =>
     c.status === 'active' && (
@@ -107,10 +106,9 @@ export const TransactionInputView: React.FC<Props> = ({
       categoryId: catId,
       categoryName: catName,
       amount: numericAmount,
-      stampEarned: isHutang ? 0 : stampsEarned,
-      pendingStamps: isHutang ? stampsEarned : 0,
+      stampEarned: stampsEarned,
       paymentMethod,
-      paymentStatus: isHutang ? 'unpaid' : 'paid',
+      paymentStatus: 'paid',
       status: 'confirmed',
       description: descText,
       createdBy: 'Admin SCS',
@@ -157,79 +155,53 @@ export const TransactionInputView: React.FC<Props> = ({
       </div>
 
       {/* Success Notification Banner from previous transaction with WhatsApp 1-Click */}
-      {lastSuccess && (() => {
-        const isLastHutang = lastSuccess.transaction.paymentStatus === 'unpaid' ||
-          (lastSuccess.transaction.paymentMethod === 'hutang' && lastSuccess.transaction.paymentStatus !== 'paid');
-        return (
-          <div className={`p-5 rounded-3xl border flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in fade-in duration-200 shadow-sm ${
-            isLastHutang
-              ? 'bg-amber-50 border-amber-200 text-amber-950'
-              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
-          }`}>
-            <div className="flex items-start sm:items-center gap-3">
-              <div className={`w-11 h-11 rounded-2xl text-white flex items-center justify-center font-bold shrink-0 shadow-sm ${
-                isLastHutang ? 'bg-amber-600' : 'bg-emerald-600'
-              }`}>
-                {isLastHutang ? <Clock className="w-6 h-6" /> : <CheckCircle2 className="w-6 h-6" />}
-              </div>
-              <div>
-                <p className={`font-extrabold text-sm flex items-center gap-2 ${isLastHutang ? 'text-amber-950' : 'text-emerald-950'}`}>
-                  <span>{isLastHutang ? 'Catatan Hutang Berhasil Disimpan!' : 'Transaksi Berhasil Disimpan!'}</span>
-                  <span className={`font-mono text-[11px] px-2 py-0.5 rounded-md font-bold ${
-                    isLastHutang ? 'bg-amber-200/70 text-amber-900' : 'bg-emerald-200/60 text-emerald-800'
-                  }`}>
-                    {lastSuccess.transaction.transactionCode}
-                  </span>
-                </p>
-                {isLastHutang ? (
-                  <p className="text-xs text-amber-900 mt-0.5">
-                    <strong>{lastSuccess.customer.name}</strong> tercatat hutang sebesar <strong>{formatRupiah(lastSuccess.amount)}</strong>.{' '}
-                    {lastSuccess.stamps > 0
-                      ? <><strong>+{lastSuccess.stamps} stempel ditahan</strong> sementara dan otomatis masuk saat hutang dilunasi.</>
-                      : 'Belum ada stempel tertahan.'}
-                  </p>
-                ) : (
-                  <p className="text-xs text-emerald-800 mt-0.5">
-                    <strong>{lastSuccess.customer.name}</strong> ({lastSuccess.customer.customerCode}) mendapatkan <strong>+{lastSuccess.stamps} stempel</strong>. Total saldo stempel saat ini: <strong>{lastSuccess.newBalance} stempel</strong>.
-                  </p>
-                )}
-                {lastSuccess.customer.phone && (
-                  <p className={`text-[11px] flex items-center gap-1 mt-1 ${isLastHutang ? 'text-amber-800' : 'text-emerald-700'}`}>
-                    <Phone className={`w-3 h-3 ${isLastHutang ? 'text-amber-600' : 'text-emerald-600'}`} />
-                    <span>WA Pelanggan: <strong>{lastSuccess.customer.phone}</strong></span>
-                  </p>
-                )}
-              </div>
+      {lastSuccess && (
+        <div className="p-5 rounded-3xl border bg-emerald-50 border-emerald-200 text-emerald-900 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in fade-in duration-200 shadow-sm">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-bold shrink-0 shadow-sm">
+              <CheckCircle2 className="w-6 h-6" />
             </div>
-
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {/* 1-Click WhatsApp Button */}
-              <WhatsAppButton
-                onClick={handleSendWA}
-                label={isLastHutang ? 'Kirim Info Tagihan WA' : 'Kirim Struk WhatsApp'}
-                size="md"
-              />
-
-              <button
-                onClick={() => onViewCustomerCard(lastSuccess.customer)}
-                className={`px-3.5 py-1.5 rounded-xl bg-white border text-xs font-bold transition shadow-xs ${
-                  isLastHutang
-                    ? 'border-amber-300 text-amber-900 hover:bg-amber-100'
-                    : 'border-emerald-300 text-emerald-800 hover:bg-emerald-100'
-                }`}
-              >
-                Lihat Kartu Digital
-              </button>
-              <button
-                onClick={() => setLastSuccess(null)}
-                className={`text-xs hover:underline px-2 py-1 ${isLastHutang ? 'text-amber-800' : 'text-emerald-700'}`}
-              >
-                Tutup
-              </button>
+            <div>
+              <p className="font-extrabold text-sm flex items-center gap-2 text-emerald-950">
+                <span>Transaksi Berhasil Disimpan!</span>
+                <span className="font-mono text-[11px] px-2 py-0.5 rounded-md font-bold bg-emerald-200/60 text-emerald-800">
+                  {lastSuccess.transaction.transactionCode}
+                </span>
+              </p>
+              <p className="text-xs text-emerald-800 mt-0.5">
+                <strong>{lastSuccess.customer.name}</strong> ({lastSuccess.customer.customerCode}) mendapatkan <strong>+{lastSuccess.stamps} stempel</strong>. Total saldo stempel saat ini: <strong>{lastSuccess.newBalance} stempel</strong>.
+              </p>
+              {lastSuccess.customer.phone && (
+                <p className="text-[11px] flex items-center gap-1 mt-1 text-emerald-700">
+                  <Phone className="w-3 h-3 text-emerald-600" />
+                  <span>WA Pelanggan: <strong>{lastSuccess.customer.phone}</strong></span>
+                </p>
+              )}
             </div>
           </div>
-        );
-      })()}
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <WhatsAppButton
+              onClick={handleSendWA}
+              label="Kirim Struk WhatsApp"
+              size="md"
+            />
+
+            <button
+              onClick={() => onViewCustomerCard(lastSuccess.customer)}
+              className="px-3.5 py-1.5 rounded-xl bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 text-xs font-bold transition shadow-xs"
+            >
+              Lihat Kartu Digital
+            </button>
+            <button
+              onClick={() => setLastSuccess(null)}
+              className="text-xs text-emerald-700 hover:underline px-2 py-1"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Two-Panel Layout */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
@@ -429,9 +401,9 @@ export const TransactionInputView: React.FC<Props> = ({
                   <p className="text-lg font-black text-slate-800 tabular-nums">{currentBalance}</p>
                 </div>
 
-                <div className={`${isHutang ? 'bg-amber-600' : 'bg-orange-600'} text-white p-2.5 rounded-xl shadow-xs`}>
+                <div className="bg-orange-600 text-white p-2.5 rounded-xl shadow-xs">
                   <p className="text-[10px] text-orange-100 uppercase font-bold">
-                    {isHutang ? 'Stempel Tertahan' : 'Stempel Didapat'}
+                    Stempel Didapat
                   </p>
                   <p className="text-xl font-black tabular-nums">+{stampsEarned}</p>
                 </div>
@@ -444,19 +416,13 @@ export const TransactionInputView: React.FC<Props> = ({
                 </div>
               </div>
 
-              {isHutang && stampsEarned > 0 && (
-                <p className="text-[11px] text-amber-800 mt-2.5 text-center font-semibold">
-                  Mode Hutang: +{stampsEarned} stempel ditahan &amp; otomatis ditambahkan saat pelanggan melunasi.
-                </p>
-              )}
-
               {numericAmount > 0 && stampsEarned === 0 && (
                 <p className="text-[11px] text-amber-700 mt-2.5 text-center font-semibold">
                   Transaksi di bawah {formatRupiah(settings.stampThreshold)} tidak mendapatkan stempel.
                 </p>
               )}
 
-              {!isHutang && balanceAfter >= settings.rewardRequiredStamps && (
+              {balanceAfter >= settings.rewardRequiredStamps && (
                 <div className="mt-3 p-2 rounded-xl bg-emerald-100 text-emerald-900 text-xs font-bold flex items-center justify-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
                   <span>Pelanggan ini langsung berhak atas {settings.defaultRewardName}!</span>
@@ -469,7 +435,7 @@ export const TransactionInputView: React.FC<Props> = ({
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                 Metode Pembayaran
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-2 gap-2.5">
                 <button
                   type="button"
                   onClick={() => setPaymentMethod('cash')}
@@ -505,24 +471,6 @@ export const TransactionInputView: React.FC<Props> = ({
                     <p className="text-[10px] text-slate-500 truncate mt-0.5">Tidak ke kas laci</p>
                   </div>
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('hutang')}
-                  className={`p-3 rounded-2xl border text-left transition flex items-center gap-3 ${
-                    paymentMethod === 'hutang'
-                      ? 'bg-amber-50 border-amber-500 text-amber-950 ring-1 ring-amber-400/50'
-                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                  }`}
-                >
-                  <div className={`p-2 rounded-xl shrink-0 ${paymentMethod === 'hutang' ? 'bg-amber-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                    <Clock className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold leading-tight">Hutang (Nanti)</p>
-                    <p className="text-[10px] text-slate-500 truncate mt-0.5">Stempel ditahan</p>
-                  </div>
-                </button>
               </div>
             </div>
 
@@ -545,17 +493,11 @@ export const TransactionInputView: React.FC<Props> = ({
               <button
                 type="submit"
                 disabled={!selectedCustomer || numericAmount <= 0}
-                className={`w-full py-3.5 px-4 rounded-2xl disabled:opacity-50 disabled:pointer-events-none text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition ${
-                  isHutang
-                    ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
-                    : 'bg-orange-600 hover:bg-orange-700 shadow-orange-600/20'
-                }`}
+                className="w-full py-3.5 px-4 rounded-2xl disabled:opacity-50 disabled:pointer-events-none bg-orange-600 hover:bg-orange-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-orange-600/20 active:scale-[0.98] transition"
               >
-                {isHutang ? <Clock className="w-5 h-5" /> : <Stamp className="w-5 h-5" />}
+                <Stamp className="w-5 h-5" />
                 <span>
-                  {isHutang
-                    ? `Simpan Catatan Hutang (Stempel Tertahan +${stampsEarned})`
-                    : `Konfirmasi Simpan Transaksi (+${stampsEarned} Stempel)`}
+                  Konfirmasi Simpan Transaksi (+{stampsEarned} Stempel)
                 </span>
               </button>
             </div>

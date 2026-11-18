@@ -13,26 +13,13 @@ import {
   QrCode,
   AlertTriangle,
   Calendar,
-  Clock,
-  CheckCircle2,
-  Banknote,
-  Stamp,
 } from 'lucide-react';
-import { CashBookEntry, CashBookEntryType, Transaction, StoreSettings, Customer, StampLedger } from '../types';
-import { formatRupiah, formatDate, getCustomerStampBalance } from '../utils/storage';
-import {
-  createDebtReminderWAMessage,
-  createConsolidatedDebtReminderWAMessage,
-  createTransactionWAMessage,
-  sendWhatsAppMessage,
-} from '../utils/whatsapp';
-import { WhatsAppIcon } from '../components/WhatsAppButton';
+import { CashBookEntry, CashBookEntryType, Transaction, StoreSettings } from '../types';
+import { formatRupiah, formatDate } from '../utils/storage';
 
 interface Props {
   entries: CashBookEntry[];
   transactions: Transaction[];
-  customers?: Customer[];
-  ledgers?: StampLedger[];
   settings: StoreSettings;
   onAddEntry: (input: {
     type: CashBookEntryType;
@@ -42,10 +29,6 @@ interface Props {
     date: string;
   }) => void;
   onDeleteEntry: (entryId: string) => void;
-  onSettleDebt?: (
-    transactionId: string,
-    settledMethod: 'cash' | 'qris'
-  ) => { transaction: Transaction; newBalance: number } | void;
 }
 
 const IN_CATEGORIES = [
@@ -75,20 +58,14 @@ function toLocalDateTimeInput(isoOrDate: Date | string): string {
 export const BukuKasView: React.FC<Props> = ({
   entries,
   transactions,
-  customers = [],
-  ledgers = [],
   settings,
   onAddEntry,
   onDeleteEntry,
-  onSettleDebt,
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'kas' | 'hutang'>('kas');
   const [periodFilter, setPeriodFilter] = useState<'today' | 'month' | 'all' | 'custom'>('all');
   const [customDate, setCustomDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [typeFilter, setTypeFilter] = useState<'all' | 'in' | 'out'>('all');
   const [search, setSearch] = useState('');
-  const [debtSearch, setDebtSearch] = useState('');
-  const [debtViewMode, setDebtViewMode] = useState<'per_nota' | 'per_pelanggan'>('per_nota');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
 
   // Add Entry Modal State
@@ -102,11 +79,6 @@ export const BukuKasView: React.FC<Props> = ({
 
   // Delete confirmation modal
   const [deletingEntry, setDeletingEntry] = useState<CashBookEntry | null>(null);
-
-  // Debt settlement modal
-  const [settlingTrx, setSettlingTrx] = useState<Transaction | null>(null);
-  const [settleMethod, setSettleMethod] = useState<'cash' | 'qris'>('cash');
-  const [sendWAOnSettle, setSendWAOnSettle] = useState(true);
 
   const todayPrefix = useMemo(() => {
     const now = new Date();
@@ -187,123 +159,6 @@ export const BukuKasView: React.FC<Props> = ({
       t => isQrisRevenue(t) && matchesPeriod(t.settledAt || t.createdAt)
     ).length;
   }, [transactions, periodFilter, customDate, todayPrefix, monthPrefix]);
-
-  // Unpaid customer debts (Hutang)
-  const unpaidDebts = useMemo(() => {
-    return transactions.filter(
-      t =>
-        t.status === 'confirmed' &&
-        (t.paymentStatus === 'unpaid' || (t.paymentMethod === 'hutang' && t.paymentStatus !== 'paid'))
-    );
-  }, [transactions]);
-
-  const totalUnpaidAmount = useMemo(
-    () => unpaidDebts.reduce((s, t) => s + t.amount, 0),
-    [unpaidDebts]
-  );
-
-  const totalHeldStamps = useMemo(
-    () => unpaidDebts.reduce((s, t) => s + (t.pendingStamps || 0), 0),
-    [unpaidDebts]
-  );
-
-  const filteredDebts = useMemo(() => {
-    if (!debtSearch.trim()) return unpaidDebts;
-    const q = debtSearch.toLowerCase();
-    return unpaidDebts.filter(
-      t =>
-        t.customerName.toLowerCase().includes(q) ||
-        t.transactionCode.toLowerCase().includes(q) ||
-        (t.description && t.description.toLowerCase().includes(q))
-    );
-  }, [unpaidDebts, debtSearch]);
-
-  const groupedDebtsByCustomer = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        customer: Customer;
-        transactions: Transaction[];
-        totalAmount: number;
-        totalHeld: number;
-      }
-    >();
-
-    filteredDebts.forEach(trx => {
-      const key = trx.customerId || trx.customerName;
-      const existing = map.get(key);
-      if (existing) {
-        existing.transactions.push(trx);
-        existing.totalAmount += trx.amount;
-        existing.totalHeld += trx.pendingStamps || 0;
-      } else {
-        const cust =
-          customers.find(c => c.id === trx.customerId || c.customerCode === trx.customerId) || {
-            id: trx.customerId,
-            name: trx.customerName,
-            customerCode: trx.customerId || 'MEMBER',
-            qrToken: 'scs_member',
-            status: 'active',
-            createdAt: trx.createdAt,
-          };
-        map.set(key, {
-          customer: cust,
-          transactions: [trx],
-          totalAmount: trx.amount,
-          totalHeld: trx.pendingStamps || 0,
-        });
-      }
-    });
-
-    return Array.from(map.values()).sort((a, b) => b.totalAmount - a.totalAmount);
-  }, [filteredDebts, customers]);
-
-  const findCustomerForTrx = (trx: Transaction): Customer => {
-    return (
-      customers.find(c => c.id === trx.customerId || c.customerCode === trx.customerId) || {
-        id: trx.customerId,
-        name: trx.customerName,
-        customerCode: trx.customerId || 'MEMBER',
-        qrToken: 'scs_member',
-        status: 'active',
-        createdAt: trx.createdAt,
-      }
-    );
-  };
-
-  const handleSendReminderWA = (trx: Transaction) => {
-    const cust = findCustomerForTrx(trx);
-    const msg = createDebtReminderWAMessage(cust, trx, settings);
-    sendWhatsAppMessage(cust.phone, msg);
-  };
-
-  const handleSendConsolidatedReminderWA = (customer: Customer, trxs: Transaction[]) => {
-    const msg = createConsolidatedDebtReminderWAMessage(customer, trxs, settings);
-    sendWhatsAppMessage(customer.phone, msg);
-  };
-
-  const handleConfirmSettle = () => {
-    if (!settlingTrx || !onSettleDebt) return;
-    const res = onSettleDebt(settlingTrx.id, settleMethod);
-
-    if (sendWAOnSettle) {
-      const cust = findCustomerForTrx(settlingTrx);
-      const settledTrx: Transaction = res?.transaction || {
-        ...settlingTrx,
-        paymentStatus: 'paid',
-        stampEarned: settlingTrx.pendingStamps || 0,
-        settledAt: new Date().toISOString(),
-        settledMethod: settleMethod,
-      };
-      const balAfter =
-        res?.newBalance ??
-        getCustomerStampBalance(cust.id, ledgers) + (settlingTrx.pendingStamps || 0);
-      const msg = createTransactionWAMessage(cust, settledTrx, balAfter, settings);
-      sendWhatsAppMessage(cust.phone, msg);
-    }
-
-    setSettlingTrx(null);
-  };
 
   // 3. Apply Type & Search Filter + Display Sort Order
   const displayedEntries = useMemo(() => {
@@ -416,317 +271,25 @@ export const BukuKasView: React.FC<Props> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex items-center gap-1 p-1 bg-slate-200/70 rounded-xl">
-            <button
-              type="button"
-              onClick={() => setActiveSubTab('kas')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition whitespace-nowrap shrink-0 ${
-                activeSubTab === 'kas'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Buku Kas Tunai
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveSubTab('hutang')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
-                activeSubTab === 'hutang'
-                  ? 'bg-white text-amber-800 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <span>Hutang Pelanggan</span>
-              {unpaidDebts.length > 0 && (
-                <span className="font-mono text-[10px] font-black text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-md tabular-nums">
-                  {unpaidDebts.length}
-                </span>
-              )}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => openAddModal('in')}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-xs active:scale-95 whitespace-nowrap shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Catat Kas Masuk</span>
+          </button>
 
-          {activeSubTab === 'kas' && (
-            <>
-              <button
-                type="button"
-                onClick={() => openAddModal('in')}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-xs active:scale-95 whitespace-nowrap shrink-0"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Catat Kas Masuk</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => openAddModal('out')}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-xs active:scale-95 whitespace-nowrap shrink-0"
-              >
-                <Minus className="w-4 h-4" />
-                <span>Catat Kas Keluar</span>
-              </button>
-            </>
-          )}
+          <button
+            type="button"
+            onClick={() => openAddModal('out')}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-xs active:scale-95 whitespace-nowrap shrink-0"
+          >
+            <Minus className="w-4 h-4" />
+            <span>Catat Kas Keluar</span>
+          </button>
         </div>
       </div>
-
-      {activeSubTab === 'hutang' ? (
-        <div className="space-y-5">
-          {/* 3 Summary Cards for Piutang / Hutang */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-            <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
-              <div className="flex items-center justify-between text-slate-500 mb-1.5">
-                <span className="text-[11px] font-bold uppercase tracking-wider">Total Piutang Belum Lunas</span>
-                <Clock className="w-4 h-4 text-amber-600 shrink-0" />
-              </div>
-              <p className="text-xl sm:text-2xl font-black text-amber-700 tabular-nums">
-                {formatRupiah(totalUnpaidAmount)}
-              </p>
-              <span className="text-[11px] text-slate-500 mt-1 block">
-                Belum masuk kas laci atau omzet QRIS
-              </span>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
-              <div className="flex items-center justify-between text-slate-500 mb-1.5">
-                <span className="text-[11px] font-bold uppercase tracking-wider">Nota Hutang Aktif</span>
-                <BookOpen className="w-4 h-4 text-slate-500 shrink-0" />
-              </div>
-              <p className="text-xl sm:text-2xl font-black text-slate-900 tabular-nums">
-                {unpaidDebts.length} <span className="text-xs font-normal text-slate-400">transaksi</span>
-              </p>
-              <span className="text-[11px] text-slate-500 mt-1 block">
-                Sekali bayar lunas (Cash / QRIS)
-              </span>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
-              <div className="flex items-center justify-between text-slate-500 mb-1.5">
-                <span className="text-[11px] font-bold uppercase tracking-wider">Stempel Tertahan</span>
-                <Stamp className="w-4 h-4 text-orange-600 shrink-0" />
-              </div>
-              <p className="text-xl sm:text-2xl font-black text-orange-600 tabular-nums">
-                +{totalHeldStamps} <span className="text-xs font-normal text-slate-400">stempel</span>
-              </p>
-              <span className="text-[11px] text-slate-500 mt-1 block">
-                Otomatis diberikan saat lunas
-              </span>
-            </div>
-          </div>
-
-          {/* Debt Search & Mode Switch */}
-          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2.5 flex-1">
-              <div className="inline-flex items-center gap-1 p-1 bg-slate-100 rounded-xl shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setDebtViewMode('per_nota')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition whitespace-nowrap shrink-0 ${
-                    debtViewMode === 'per_nota'
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Per Nota ({filteredDebts.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDebtViewMode('per_pelanggan')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition whitespace-nowrap shrink-0 ${
-                    debtViewMode === 'per_pelanggan'
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Rekap per Pelanggan ({groupedDebtsByCustomer.length})
-                </button>
-              </div>
-
-              <div className="relative flex-1 min-w-[200px] sm:max-w-xs">
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  placeholder="Cari nama pelanggan atau kode transaksi..."
-                  value={debtSearch}
-                  onChange={e => setDebtSearch(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                />
-              </div>
-            </div>
-            <p className="text-[11px] text-slate-500">
-              Saat dilunasi via <strong className="text-emerald-700">Cash</strong> otomatis masuk Buku Kas Tunai · via <strong className="text-blue-700">QRIS</strong> masuk Omzet QRIS.
-            </p>
-          </div>
-
-          {/* Unpaid Debts Table */}
-          {debtViewMode === 'per_pelanggan' ? (
-            <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-bold text-[10px]">
-                    <tr>
-                      <th className="px-4 py-3">Pelanggan</th>
-                      <th className="px-4 py-3">Jumlah Nota</th>
-                      <th className="px-4 py-3 text-right">Total Tagihan</th>
-                      <th className="px-4 py-3 text-center">Stempel Tertahan</th>
-                      <th className="px-4 py-3 text-right">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {groupedDebtsByCustomer.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="px-4 py-12 text-center text-slate-400">
-                          <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-300" />
-                          <p className="font-semibold text-slate-700">
-                            {unpaidDebts.length === 0
-                              ? 'Tidak ada hutang pelanggan yang belum lunas'
-                              : 'Tidak ada data hutang yang cocok dengan pencarian'}
-                          </p>
-                        </td>
-                      </tr>
-                    ) : (
-                      groupedDebtsByCustomer.map(group => (
-                        <tr key={group.customer.id} className="hover:bg-slate-50/80 transition">
-                          <td className="px-4 py-3">
-                            <span className="font-bold text-slate-900 block">{group.customer.name}</span>
-                            <span className="text-[10px] text-slate-500 font-mono">
-                              {group.customer.customerCode}
-                              {group.customer.phone ? ` · ${group.customer.phone}` : ' · Belum ada No WA'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="font-semibold text-slate-800 block tabular-nums">
-                              {group.transactions.length} nota belum lunas
-                            </span>
-                            <span className="text-[10px] text-slate-400 truncate block max-w-xs">
-                              {group.transactions.map(t => t.transactionCode).join(', ')}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-right font-black text-amber-700 tabular-nums whitespace-nowrap">
-                            {formatRupiah(group.totalAmount)}
-                          </td>
-                          <td className="px-4 py-3 text-center whitespace-nowrap">
-                            <span className="text-xs font-bold text-amber-700 tabular-nums">
-                              {group.totalHeld > 0 ? `+${group.totalHeld} tertahan` : '0'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-right whitespace-nowrap">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleSendConsolidatedReminderWA(group.customer, group.transactions)
-                              }
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition shadow-xs active:scale-95 whitespace-nowrap shrink-0"
-                            >
-                              <WhatsAppIcon className="w-3.5 h-3.5 text-white" />
-                              <span>Tagih Total via WA</span>
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-bold text-[10px]">
-                    <tr>
-                      <th className="px-4 py-3">Tanggal &amp; Kode</th>
-                      <th className="px-4 py-3">Pelanggan</th>
-                      <th className="px-4 py-3">Layanan &amp; Keterangan</th>
-                      <th className="px-4 py-3 text-right">Nominal Tagihan</th>
-                      <th className="px-4 py-3 text-center">Stempel Tertahan</th>
-                      <th className="px-4 py-3 text-right">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredDebts.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
-                          <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-300" />
-                          <p className="font-semibold text-slate-700">
-                            {unpaidDebts.length === 0
-                              ? 'Tidak ada hutang pelanggan yang belum lunas'
-                              : 'Tidak ada data hutang yang cocok dengan pencarian'}
-                          </p>
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredDebts.map(trx => {
-                        const cust = findCustomerForTrx(trx);
-                        const held = trx.pendingStamps || 0;
-                        return (
-                          <tr key={trx.id} className="hover:bg-slate-50/80 transition">
-                            <td className="px-4 py-3 whitespace-nowrap">
-                              <span className="font-mono font-bold text-slate-800 block">
-                                {trx.transactionCode}
-                              </span>
-                              <span className="text-[10px] text-slate-400 tabular-nums">
-                                {formatDate(trx.createdAt)}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className="font-bold text-slate-900 block">{trx.customerName}</span>
-                              {cust.phone && (
-                                <span className="text-[10px] text-slate-500 font-mono">{cust.phone}</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className="text-slate-700 font-medium block max-w-xs truncate">
-                                {trx.description || trx.categoryName || 'Transaksi Toko'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-right font-black text-amber-700 tabular-nums whitespace-nowrap">
-                              {formatRupiah(trx.amount)}
-                            </td>
-                            <td className="px-4 py-3 text-center whitespace-nowrap">
-                              <span className="text-xs font-bold text-amber-700 tabular-nums">
-                                {held > 0 ? `+${held} tertahan` : '0'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-right whitespace-nowrap">
-                              <div className="inline-flex items-center justify-end gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => handleSendReminderWA(trx)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold transition whitespace-nowrap shrink-0"
-                                  title="Kirim pengingat tagihan via WhatsApp"
-                                >
-                                  <WhatsAppIcon className="w-3.5 h-3.5 text-emerald-600" />
-                                  <span>Ingatkan WA</span>
-                                </button>
-                                {onSettleDebt && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setSettlingTrx(trx);
-                                      setSettleMethod('cash');
-                                      setSendWAOnSettle(!!cust.phone);
-                                    }}
-                                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition shadow-xs active:scale-95 whitespace-nowrap shrink-0"
-                                  >
-                                    <CheckCircle2 className="w-3.5 h-3.5" />
-                                    <span>Lunasi</span>
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <>
 
       {/* 4 Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
@@ -996,8 +559,6 @@ export const BukuKasView: React.FC<Props> = ({
           </table>
         </div>
       </div>
-        </>
-      )}
 
       {/* Modal Add Kas Masuk / Kas Keluar */}
       {isModalOpen && (
@@ -1230,124 +791,6 @@ export const BukuKasView: React.FC<Props> = ({
               >
                 Ya, Hapus
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Debt Settlement Modal */}
-      {settlingTrx && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-3xl bg-white shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-4 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-white/20">
-                  <CheckCircle2 className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-base leading-tight">Pelunasan Hutang</h3>
-                  <p className="text-xs text-emerald-100">
-                    {settlingTrx.customerName} · {settlingTrx.transactionCode}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSettlingTrx(null)}
-                className="p-1 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-5 sm:p-6 space-y-4">
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] font-semibold text-slate-500 uppercase">Total Tagihan Lunas</p>
-                  <p className="text-xl font-black text-slate-900 tabular-nums mt-0.5">
-                    {formatRupiah(settlingTrx.amount)}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[11px] font-semibold text-slate-500 uppercase">Stempel Cair</p>
-                  <p className="text-lg font-black text-orange-600 tabular-nums mt-0.5">
-                    +{settlingTrx.pendingStamps || 0}
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                  Metode Pembayaran Pelunasan
-                </label>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setSettleMethod('cash')}
-                    className={`p-3 rounded-xl border text-left transition flex items-center gap-2.5 ${
-                      settleMethod === 'cash'
-                        ? 'bg-emerald-50 border-emerald-500 text-emerald-950 ring-1 ring-emerald-400/50'
-                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className={`p-1.5 rounded-lg shrink-0 ${settleMethod === 'cash' ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                      <Banknote className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold leading-tight">Cash (Tunai)</p>
-                      <p className="text-[10px] text-slate-500 truncate">Masuk Buku Kas</p>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setSettleMethod('qris')}
-                    className={`p-3 rounded-xl border text-left transition flex items-center gap-2.5 ${
-                      settleMethod === 'qris'
-                        ? 'bg-blue-50 border-blue-500 text-blue-950 ring-1 ring-blue-400/50'
-                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className={`p-1.5 rounded-lg shrink-0 ${settleMethod === 'qris' ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                      <QrCode className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold leading-tight">QRIS</p>
-                      <p className="text-[10px] text-slate-500 truncate">Tidak ke kas laci</p>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              <label className="flex items-center justify-between p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200/80 cursor-pointer select-none">
-                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-950">
-                  <WhatsAppIcon className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Kirim Struk Lunas via WhatsApp</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={sendWAOnSettle}
-                  onChange={e => setSendWAOnSettle(e.target.checked)}
-                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300"
-                />
-              </label>
-
-              <div className="flex items-center justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setSettlingTrx(null)}
-                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-50 transition"
-                >
-                  Batal
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmSettle}
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-sm active:scale-95"
-                >
-                  Konfirmasi Lunas
-                </button>
-              </div>
             </div>
           </div>
         </div>

@@ -21,6 +21,7 @@ import {
   Store,
   RefreshCw,
   BookOpen,
+  Clock,
 } from 'lucide-react';
 
 import {
@@ -33,7 +34,7 @@ import {
   StoreSettings,
   CashBookEntry,
   CashBookEntryType,
-  PaymentMethod,
+  CustomerDebt,
 } from './types';
 import {
   loadAppData,
@@ -46,12 +47,14 @@ import {
 import { sound } from './utils/audio';
 import {
   sendTransactionToGoogleSheets,
-  sendTransactionSettlementToGoogleSheets,
   sendCustomerToGoogleSheets,
   sendRedemptionToGoogleSheets,
   sendSettingsToGoogleSheets,
   sendCashEntryToGoogleSheets,
   deleteCashEntryFromGoogleSheets,
+  sendDebtToGoogleSheets,
+  sendDebtSettlementToGoogleSheets,
+  sendDebtCancellationToGoogleSheets,
   fetchDataFromGoogleSheets,
 } from './utils/googleSheets';
 
@@ -64,6 +67,7 @@ import { RewardsView } from './views/RewardsView';
 import { ReportsView } from './views/ReportsView';
 import { SettingsView } from './views/SettingsView';
 import { BukuKasView } from './views/BukuKasView';
+import { HutangView } from './views/HutangView';
 import { PublicCardView } from './views/PublicCardView';
 import { LoginModal } from './views/LoginModal';
 
@@ -78,6 +82,7 @@ type AdminTab =
   | 'dashboard'
   | 'cashier'
   | 'customers'
+  | 'debts'
   | 'transactions'
   | 'cashbook'
   | 'rewards'
@@ -175,7 +180,8 @@ export default function App() {
           if (
             pulled.customers.length === 0 &&
             pulled.transactions.length === 0 &&
-            (prev.customers.length > 0 || prev.transactions.length > 0)
+            (pulled.debts || []).length === 0 &&
+            (prev.customers.length > 0 || prev.transactions.length > 0 || prev.debts.length > 0)
           ) {
             return prev;
           }
@@ -218,23 +224,65 @@ export default function App() {
             return rawId;
           };
 
-          // Merge transactions by transactionCode
-          const trxMap = new Map<string, Transaction>();
-          prev.transactions.forEach(t => {
-            const cid = resolveCustId(t.customerId, t.customerName);
-            trxMap.set(t.transactionCode, { ...t, customerId: cid });
+          // Merge debts by debtCode
+          const debtMap = new Map<string, CustomerDebt>();
+          prev.debts.forEach(d => {
+            const cid = resolveCustId(d.customerId, d.customerName);
+            debtMap.set(d.debtCode, { ...d, customerId: cid });
           });
-          pulled.transactions.forEach(t => {
+          (pulled.debts || []).forEach(d => {
+            const cid = resolveCustId(d.customerId, d.customerName);
+            const existing = debtMap.get(d.debtCode);
+            debtMap.set(d.debtCode, {
+              ...existing,
+              ...d,
+              id: existing?.id || d.id,
+              customerId: cid,
+            });
+          });
+
+          // Merge transactions by transactionCode & migrate any legacy unpaid hutang rows into debts
+          const trxMap = new Map<string, Transaction>();
+          const handleLegacyOrTrx = (t: Transaction, isRemote: boolean) => {
             const cid = resolveCustId(t.customerId, t.customerName);
-            const existing = trxMap.get(t.transactionCode);
+            const isLegacyUnpaid =
+              t.status === 'confirmed' &&
+              (t.paymentStatus === 'unpaid' || (t.paymentMethod === 'hutang' && t.paymentStatus !== 'paid'));
+            if (isLegacyUnpaid) {
+              if (!debtMap.has(t.transactionCode)) {
+                debtMap.set(t.transactionCode, {
+                  id: `htg-mig-${t.transactionCode}`,
+                  debtCode: t.transactionCode,
+                  customerId: cid,
+                  customerName: t.customerName,
+                  categoryId: t.categoryId || 'cat-10',
+                  categoryName: t.categoryName || 'Transaksi Toko',
+                  amount: t.amount,
+                  pendingStamps: t.pendingStamps || 0,
+                  description: t.description || t.categoryName || 'Transaksi Toko',
+                  status: 'unpaid',
+                  createdBy: t.createdBy || 'Admin SCS',
+                  createdAt: t.createdAt,
+                });
+              }
+              return;
+            }
+            const existing = isRemote ? trxMap.get(t.transactionCode) : undefined;
             trxMap.set(t.transactionCode, {
               ...existing,
               ...t,
               id: existing?.id || t.id,
               customerId: cid,
             });
-          });
+          };
+
+          prev.transactions.forEach(t => handleLegacyOrTrx(t, false));
+          pulled.transactions.forEach(t => handleLegacyOrTrx(t, true));
+
           const mergedTransactions = Array.from(trxMap.values()).sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+          const mergedDebts = Array.from(debtMap.values()).sort(
             (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
           );
 
@@ -361,6 +409,7 @@ export default function App() {
             ledgers: rebuiltLedgers,
             redemptions: mergedRedemptions,
             cashBook: mergedCashBook,
+            debts: mergedDebts,
             rewards: updatedRewards,
             settings: mergedSettings,
           };
@@ -397,7 +446,7 @@ export default function App() {
     }
   }, []);
 
-  // Transaction Handler
+  // Transaction Handler (Cash & QRIS only — Hutang managed separately in HutangView)
   const handleAddTransaction = (trxInput: {
     customerId: string;
     customerName: string;
@@ -405,29 +454,29 @@ export default function App() {
     categoryName: string;
     amount: number;
     stampEarned: number;
-    paymentMethod?: PaymentMethod;
+    paymentMethod?: 'cash' | 'qris';
     description: string;
   }) => {
     const nowIso = new Date().toISOString();
     const dateCode = nowIso.slice(0, 10).replace(/-/g, '');
-    const countSeq = String(data.transactions.length + 1).padStart(3, '0');
-    const payMethod: PaymentMethod = trxInput.paymentMethod || 'cash';
-    const isHutang = payMethod === 'hutang';
-    const awardedStamps = isHutang ? 0 : trxInput.stampEarned;
-    const heldStamps = isHutang ? trxInput.stampEarned : 0;
+    const trxPrefix = `TRX-${dateCode}-`;
+    const maxTrxSeq = data.transactions
+      .filter(t => t.transactionCode.startsWith(trxPrefix))
+      .reduce((max, t) => Math.max(max, parseInt(t.transactionCode.replace(trxPrefix, ''), 10) || 0), 0);
+    const countSeq = String(Math.max(data.transactions.length, maxTrxSeq) + 1).padStart(3, '0');
+    const payMethod: 'cash' | 'qris' = trxInput.paymentMethod === 'qris' ? 'qris' : 'cash';
 
     const newTransaction: Transaction = {
       id: generateId('trx'),
-      transactionCode: `TRX-${dateCode}-${countSeq}`,
+      transactionCode: `${trxPrefix}${countSeq}`,
       customerId: trxInput.customerId,
       customerName: trxInput.customerName,
       categoryId: trxInput.categoryId,
       categoryName: trxInput.categoryName,
       amount: trxInput.amount,
-      stampEarned: awardedStamps,
-      pendingStamps: heldStamps,
+      stampEarned: trxInput.stampEarned,
       paymentMethod: payMethod,
-      paymentStatus: isHutang ? 'unpaid' : 'paid',
+      paymentStatus: 'paid',
       status: 'confirmed',
       description: trxInput.description,
       createdBy: 'Admin SCS',
@@ -435,16 +484,16 @@ export default function App() {
     };
 
     const curBal = getCustomerStampBalance(trxInput.customerId, data.ledgers);
-    const newBal = curBal + awardedStamps;
+    const newBal = curBal + trxInput.stampEarned;
 
     const newLedger: StampLedger | null =
-      !isHutang && awardedStamps > 0
+      trxInput.stampEarned > 0
         ? {
             id: generateId('ldg'),
             customerId: trxInput.customerId,
             transactionId: newTransaction.id,
             type: 'earn',
-            amount: awardedStamps,
+            amount: trxInput.stampEarned,
             balanceAfter: newBal,
             description: `Stempel transaksi ${trxInput.categoryName} (${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(trxInput.amount)})`,
             createdBy: 'Admin SCS',
@@ -500,32 +549,97 @@ export default function App() {
     return newTransaction;
   };
 
-  // Settle Hutang (Single Full Payment -> Award Held Stamps + Record Cash Entry if Cash)
-  const handleSettleDebt = (
-    transactionId: string,
-    settledMethod: 'cash' | 'qris'
-  ): { transaction: Transaction; newBalance: number } | undefined => {
-    const target = data.transactions.find(t => t.id === transactionId);
-    if (
-      !target ||
-      target.status !== 'confirmed' ||
-      (target.paymentStatus !== 'unpaid' && !(target.paymentMethod === 'hutang' && target.paymentStatus !== 'paid'))
-    ) {
-      return undefined;
+  // Dedicated Member Debt Handlers (Catat Hutang, Pelunasan Lunas, Batal)
+  const handleAddDebt = (input: {
+    customerId: string;
+    customerName: string;
+    categoryId: string;
+    categoryName: string;
+    amount: number;
+    pendingStamps: number;
+    description: string;
+  }): CustomerDebt => {
+    const nowIso = new Date().toISOString();
+    const dateCode = nowIso.slice(0, 10).replace(/-/g, '');
+    const htgPrefix = `HTG-${dateCode}-`;
+    const maxSeq = data.debts
+      .filter(d => d.debtCode.startsWith(htgPrefix))
+      .reduce((max, d) => Math.max(max, parseInt(d.debtCode.replace(htgPrefix, ''), 10) || 0), 0);
+    const seq = String(maxSeq + 1).padStart(3, '0');
+
+    const newDebt: CustomerDebt = {
+      id: generateId('htg'),
+      debtCode: `${htgPrefix}${seq}`,
+      customerId: input.customerId,
+      customerName: input.customerName,
+      categoryId: input.categoryId,
+      categoryName: input.categoryName,
+      amount: input.amount,
+      pendingStamps: input.pendingStamps,
+      description: input.description,
+      status: 'unpaid',
+      createdBy: 'Admin SCS',
+      createdAt: nowIso,
+    };
+
+    const nextDebts = [newDebt, ...data.debts];
+    setData(prev => {
+      const next = { ...prev, debts: nextDebts };
+      saveAppData(next);
+      return next;
+    });
+
+    if (data.settings.googleSheetsScriptUrl) {
+      sendDebtToGoogleSheets(data.settings.googleSheetsScriptUrl, newDebt);
     }
+
+    return newDebt;
+  };
+
+  const handleSettleDebt = (
+    debtId: string,
+    settledMethod: 'cash' | 'qris'
+  ): { debt: CustomerDebt; transaction: Transaction; newBalance: number } | undefined => {
+    const target = data.debts.find(d => d.id === debtId && d.status === 'unpaid');
+    if (!target) return undefined;
 
     const nowIso = new Date().toISOString();
     const dateCode = nowIso.slice(0, 10).replace(/-/g, '');
-    const stampsToAward = target.pendingStamps ?? target.stampEarned ?? 0;
+    const stampsToAward = target.pendingStamps || 0;
     const curBal = getCustomerStampBalance(target.customerId, data.ledgers);
     const newBal = curBal + stampsToAward;
 
-    const updatedTransaction: Transaction = {
-      ...target,
-      paymentStatus: 'paid',
+    const trxPrefix = `TRX-${dateCode}-`;
+    const maxTrxSeq = data.transactions
+      .filter(t => t.transactionCode.startsWith(trxPrefix))
+      .reduce((max, t) => Math.max(max, parseInt(t.transactionCode.replace(trxPrefix, ''), 10) || 0), 0);
+    const trxSeq = String(Math.max(data.transactions.length, maxTrxSeq) + 1).padStart(3, '0');
+
+    const settledTrx: Transaction = {
+      id: generateId('trx'),
+      transactionCode: `${trxPrefix}${trxSeq}`,
+      customerId: target.customerId,
+      customerName: target.customerName,
+      categoryId: target.categoryId,
+      categoryName: target.categoryName,
+      amount: target.amount,
       stampEarned: stampsToAward,
+      paymentMethod: settledMethod,
+      paymentStatus: 'paid',
       settledAt: nowIso,
       settledMethod,
+      status: 'confirmed',
+      description: `Pelunasan ${target.debtCode}${target.description ? ` · ${target.description}` : ''}`,
+      createdBy: 'Admin SCS',
+      createdAt: nowIso,
+    };
+
+    const updatedDebt: CustomerDebt = {
+      ...target,
+      status: 'paid',
+      settledAt: nowIso,
+      settledMethod,
+      settledTransactionId: settledTrx.id,
     };
 
     const earnLedger: StampLedger | null =
@@ -533,11 +647,11 @@ export default function App() {
         ? {
             id: generateId('ldg'),
             customerId: target.customerId,
-            transactionId: target.id,
+            transactionId: settledTrx.id,
             type: 'earn',
             amount: stampsToAward,
             balanceAfter: newBal,
-            description: `Pelunasan hutang ${target.transactionCode}`,
+            description: `Pelunasan hutang ${target.debtCode}`,
             createdBy: 'Admin SCS',
             createdAt: nowIso,
           }
@@ -556,23 +670,23 @@ export default function App() {
         date: nowIso,
         type: 'in',
         category: 'Pelunasan Hutang',
-        description: `${target.customerName} · Pelunasan ${target.transactionCode}`,
+        description: `${target.customerName} · Pelunasan ${target.debtCode}`,
         amount: target.amount,
-        sourceTransactionId: target.id,
+        sourceTransactionId: settledTrx.id,
         createdBy: 'Admin SCS',
         createdAt: nowIso,
       };
     }
 
-    const nextTransactions = data.transactions.map(t =>
-      t.id === transactionId ? updatedTransaction : t
-    );
+    const nextDebts = data.debts.map(d => (d.id === debtId ? updatedDebt : d));
+    const nextTransactions = [settledTrx, ...data.transactions];
     const nextLedgers = earnLedger ? [earnLedger, ...data.ledgers] : data.ledgers;
     const nextCashBook = newCashEntry ? [newCashEntry, ...data.cashBook] : data.cashBook;
 
     setData(prev => {
       const next = {
         ...prev,
+        debts: nextDebts,
         transactions: nextTransactions,
         ledgers: nextLedgers,
         cashBook: nextCashBook,
@@ -582,17 +696,39 @@ export default function App() {
     });
 
     if (data.settings.googleSheetsScriptUrl) {
-      sendTransactionSettlementToGoogleSheets(
+      sendDebtSettlementToGoogleSheets(
         data.settings.googleSheetsScriptUrl,
-        updatedTransaction,
-        newBal
+        target.debtCode,
+        nowIso,
+        settledMethod,
+        settledTrx.transactionCode
       );
+      sendTransactionToGoogleSheets(data.settings.googleSheetsScriptUrl, settledTrx, newBal);
       if (newCashEntry) {
         sendCashEntryToGoogleSheets(data.settings.googleSheetsScriptUrl, newCashEntry);
       }
     }
 
-    return { transaction: updatedTransaction, newBalance: newBal };
+    return { debt: updatedDebt, transaction: settledTrx, newBalance: newBal };
+  };
+
+  const handleCancelDebt = (debtId: string) => {
+    const target = data.debts.find(d => d.id === debtId && d.status === 'unpaid');
+    if (!target) return;
+
+    const nextDebts = data.debts.map(d =>
+      d.id === debtId ? { ...d, status: 'cancelled' as const } : d
+    );
+
+    setData(prev => {
+      const next = { ...prev, debts: nextDebts };
+      saveAppData(next);
+      return next;
+    });
+
+    if (data.settings.googleSheetsScriptUrl) {
+      sendDebtCancellationToGoogleSheets(data.settings.googleSheetsScriptUrl, target.debtCode);
+    }
   };
 
   // Manual Buku Kas Umum Entry Handlers
@@ -923,7 +1059,7 @@ export default function App() {
           <CustomersView
             customers={data.customers}
             ledgers={data.ledgers}
-            transactions={data.transactions}
+            debts={data.debts}
             settings={data.settings}
             onAddCustomer={() => {
               setEditingCustomer(null);
@@ -950,6 +1086,20 @@ export default function App() {
           />
         );
 
+      case 'debts':
+        return (
+          <HutangView
+            debts={data.debts}
+            customers={data.customers}
+            categories={data.categories}
+            ledgers={data.ledgers}
+            settings={data.settings}
+            onAddDebt={handleAddDebt}
+            onSettleDebt={handleSettleDebt}
+            onCancelDebt={handleCancelDebt}
+          />
+        );
+
       case 'transactions':
         return (
           <TransactionsView
@@ -959,7 +1109,6 @@ export default function App() {
             ledgers={data.ledgers}
             settings={data.settings}
             onCancelTransaction={handleCancelTransaction}
-            onSettleDebt={handleSettleDebt}
             onNewTransaction={() => setActiveTab('cashier')}
           />
         );
@@ -969,12 +1118,9 @@ export default function App() {
           <BukuKasView
             entries={data.cashBook}
             transactions={data.transactions}
-            customers={data.customers}
-            ledgers={data.ledgers}
             settings={data.settings}
             onAddEntry={handleAddCashEntry}
             onDeleteEntry={handleDeleteCashEntry}
-            onSettleDebt={handleSettleDebt}
           />
         );
 
@@ -1016,6 +1162,7 @@ export default function App() {
             redemptions={data.redemptions}
             ledgers={data.ledgers}
             cashBook={data.cashBook}
+            debts={data.debts}
             onSaveSettings={handleSaveSettings}
             onSaveCategories={handleSaveCategories}
             onResetData={handleResetData}
@@ -1030,6 +1177,8 @@ export default function App() {
         return null;
     }
   };
+
+  const unpaidDebtCount = data.debts.filter(d => d.status === 'unpaid').length;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans pb-24 md:pb-8 selection:bg-orange-500 selection:text-white w-full max-w-full overflow-x-hidden">
@@ -1063,7 +1212,7 @@ export default function App() {
           </div>
 
           {/* Zone 2: Navigation Links (Clean single line links) */}
-          <nav className="hidden lg:flex items-center gap-6 text-xs font-semibold text-slate-600">
+          <nav className="hidden lg:flex items-center gap-4 xl:gap-5 text-xs font-semibold text-slate-600">
             <button
               onClick={() => setActiveTab('dashboard')}
               className={`hover:text-orange-600 transition whitespace-nowrap shrink-0 ${
@@ -1087,6 +1236,19 @@ export default function App() {
               }`}
             >
               Pelanggan
+            </button>
+            <button
+              onClick={() => setActiveTab('debts')}
+              className={`hover:text-amber-700 transition whitespace-nowrap shrink-0 flex items-center gap-1 ${
+                activeTab === 'debts' ? 'text-amber-700 font-bold' : ''
+              }`}
+            >
+              <span>Hutang</span>
+              {unpaidDebtCount > 0 && (
+                <span className="font-mono text-[10px] font-black text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded-md tabular-nums">
+                  {unpaidDebtCount}
+                </span>
+              )}
             </button>
             <button
               onClick={() => setActiveTab('transactions')}
@@ -1209,7 +1371,7 @@ export default function App() {
 
       {/* Mobile Fixed Bottom Navigation Bar */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/80 px-1 py-1 shadow-lg w-full">
-        <div className="grid grid-cols-6 items-center w-full max-w-md mx-auto">
+        <div className="grid grid-cols-7 items-center w-full max-w-md mx-auto">
           <button
             onClick={() => setActiveTab('dashboard')}
             className={`flex flex-col items-center justify-center py-1 transition min-w-0 ${
@@ -1227,7 +1389,20 @@ export default function App() {
             }`}
           >
             <Users className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-[10px] mt-0.5 truncate max-w-full px-0.5 leading-tight">Pelanggan</span>
+            <span className="text-[10px] mt-0.5 truncate max-w-full px-0.5 leading-tight">Member</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('debts')}
+            className={`relative flex flex-col items-center justify-center py-1 transition min-w-0 ${
+              activeTab === 'debts' ? 'text-amber-700 font-bold' : 'text-slate-500'
+            }`}
+          >
+            <Clock className="w-4 h-4 sm:w-5 sm:h-5" />
+            {unpaidDebtCount > 0 && (
+              <span className="absolute top-0.5 right-2 w-2 h-2 rounded-full bg-amber-600" />
+            )}
+            <span className="text-[10px] mt-0.5 truncate max-w-full px-0.5 leading-tight">Hutang</span>
           </button>
 
           <button
@@ -1237,7 +1412,7 @@ export default function App() {
             }`}
           >
             <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-[10px] mt-0.5 truncate max-w-full px-0.5 leading-tight">Buku Kas</span>
+            <span className="text-[10px] mt-0.5 truncate max-w-full px-0.5 leading-tight">Kas</span>
           </button>
 
           <button
@@ -1267,7 +1442,7 @@ export default function App() {
             }`}
           >
             <Settings className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span className="text-[10px] mt-0.5 truncate max-w-full px-0.5 leading-tight">Pengaturan</span>
+            <span className="text-[10px] mt-0.5 truncate max-w-full px-0.5 leading-tight">Atur</span>
           </button>
         </div>
       </nav>

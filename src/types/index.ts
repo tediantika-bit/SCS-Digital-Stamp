@@ -47,6 +47,26 @@ export interface Transaction {
   createdAt: string;
 }
 
+export type DebtStatus = 'unpaid' | 'paid' | 'cancelled';
+
+export interface CustomerDebt {
+  id: string;
+  debtCode: string; // e.g. HTG-20261118-001
+  customerId: string;
+  customerName: string;
+  categoryId: string;
+  categoryName: string;
+  amount: number; // in IDR
+  pendingStamps: number; // stamps held until debt is settled
+  description?: string;
+  status: DebtStatus;
+  settledAt?: string;
+  settledMethod?: 'cash' | 'qris';
+  settledTransactionId?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
 export type CashBookEntryType = 'in' | 'out';
 
 export interface CashBookEntry {

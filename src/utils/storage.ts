@@ -1,4 +1,4 @@
-import { Customer, Transaction, TransactionCategory, StampLedger, Reward, Redemption, StoreSettings, CashBookEntry } from '../types';
+import { Customer, Transaction, TransactionCategory, StampLedger, Reward, Redemption, StoreSettings, CashBookEntry, CustomerDebt } from '../types';
 
 // ============================================================================
 // URL GOOGLE APPS SCRIPT DEFAULT (OTOMATIS AKTIF DI SEMUA PERANGKAT / BROWSER)
@@ -52,6 +52,7 @@ export const DEFAULT_LEDGERS: StampLedger[] = [];
 
 export const DEFAULT_REDEMPTIONS: Redemption[] = [];
 export const DEFAULT_CASH_BOOK: CashBookEntry[] = [];
+export const DEFAULT_DEBTS: CustomerDebt[] = [];
 
 // Storage Keys
 const STORAGE_PREFIX = 'scs_stamp_v2_';
@@ -64,6 +65,7 @@ const KEYS = {
   REWARDS: `${STORAGE_PREFIX}rewards`,
   REDEMPTIONS: `${STORAGE_PREFIX}redemptions`,
   CASH_BOOK: `${STORAGE_PREFIX}cash_book`,
+  DEBTS: `${STORAGE_PREFIX}debts`,
 };
 
 export interface AppData {
@@ -75,6 +77,7 @@ export interface AppData {
   rewards: Reward[];
   redemptions: Redemption[];
   cashBook: CashBookEntry[];
+  debts: CustomerDebt[];
 }
 
 export function loadAppData(): AppData {
@@ -88,6 +91,7 @@ export function loadAppData(): AppData {
       rewards: DEFAULT_REWARDS,
       redemptions: DEFAULT_REDEMPTIONS,
       cashBook: DEFAULT_CASH_BOOK,
+      debts: DEFAULT_DEBTS,
     };
   }
 
@@ -100,6 +104,7 @@ export function loadAppData(): AppData {
     const rawRewards = localStorage.getItem(KEYS.REWARDS);
     const rawRedemptions = localStorage.getItem(KEYS.REDEMPTIONS);
     const rawCashBook = localStorage.getItem(KEYS.CASH_BOOK);
+    const rawDebts = localStorage.getItem(KEYS.DEBTS);
 
     let settings: StoreSettings = rawSettings ? JSON.parse(rawSettings) : DEFAULT_SETTINGS;
 
@@ -189,16 +194,57 @@ export function loadAppData(): AppData {
     }
 
     const parsedCashBook: CashBookEntry[] = rawCashBook ? JSON.parse(rawCashBook) : DEFAULT_CASH_BOOK;
+    const parsedDebts: CustomerDebt[] = rawDebts ? JSON.parse(rawDebts) : DEFAULT_DEBTS;
+
+    const normalizedDebts: CustomerDebt[] = parsedDebts.map(d => ({
+      ...d,
+      customerId:
+        idMap[d.customerId] ||
+        (d.customerName ? nameMap[d.customerName.toLowerCase().trim()] : undefined) ||
+        d.customerId,
+    }));
+
+    // Migrate any legacy unpaid hutang transactions into normalizedDebts
+    const finalTransactions: Transaction[] = [];
+    normalizedTransactions.forEach(t => {
+      const isLegacyUnpaid =
+        t.status === 'confirmed' &&
+        (t.paymentStatus === 'unpaid' || (t.paymentMethod === 'hutang' && t.paymentStatus !== 'paid'));
+      if (isLegacyUnpaid) {
+        const alreadyMigrated = normalizedDebts.some(
+          d => d.id === `htg-mig-${t.transactionCode}` || d.debtCode === t.transactionCode
+        );
+        if (!alreadyMigrated) {
+          normalizedDebts.push({
+            id: `htg-mig-${t.transactionCode}`,
+            debtCode: t.transactionCode,
+            customerId: t.customerId,
+            customerName: t.customerName,
+            categoryId: t.categoryId || 'cat-10',
+            categoryName: t.categoryName || 'Transaksi Toko',
+            amount: t.amount,
+            pendingStamps: t.pendingStamps || 0,
+            description: t.description || t.categoryName || 'Transaksi Toko',
+            status: 'unpaid',
+            createdBy: t.createdBy || 'Admin SCS',
+            createdAt: t.createdAt,
+          });
+        }
+      } else {
+        finalTransactions.push(t);
+      }
+    });
 
     return {
       settings,
       categories: parsedCategories,
       customers: normalizedCustomers,
-      transactions: normalizedTransactions,
+      transactions: finalTransactions,
       ledgers: normalizedLedgers,
       rewards: rawRewards ? JSON.parse(rawRewards) : DEFAULT_REWARDS,
       redemptions: normalizedRedemptions,
       cashBook: parsedCashBook,
+      debts: normalizedDebts,
     };
   } catch (err) {
     console.error('Failed to parse stored app data:', err);
@@ -211,6 +257,7 @@ export function loadAppData(): AppData {
       rewards: DEFAULT_REWARDS,
       redemptions: DEFAULT_REDEMPTIONS,
       cashBook: DEFAULT_CASH_BOOK,
+      debts: DEFAULT_DEBTS,
     };
   }
 }
@@ -226,6 +273,7 @@ export function saveAppData(data: Partial<AppData>) {
     if (data.rewards) localStorage.setItem(KEYS.REWARDS, JSON.stringify(data.rewards));
     if (data.redemptions) localStorage.setItem(KEYS.REDEMPTIONS, JSON.stringify(data.redemptions));
     if (data.cashBook) localStorage.setItem(KEYS.CASH_BOOK, JSON.stringify(data.cashBook));
+    if (data.debts) localStorage.setItem(KEYS.DEBTS, JSON.stringify(data.debts));
   } catch (err) {
     console.error('Failed to persist app data:', err);
   }
@@ -241,6 +289,7 @@ export function resetAllData(): AppData {
     rewards: DEFAULT_REWARDS,
     redemptions: DEFAULT_REDEMPTIONS,
     cashBook: DEFAULT_CASH_BOOK,
+    debts: DEFAULT_DEBTS,
   };
   saveAppData(initialData);
   return initialData;

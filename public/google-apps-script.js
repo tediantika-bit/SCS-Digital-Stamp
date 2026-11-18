@@ -81,13 +81,28 @@ function setupSheets() {
     .setBackground("#0f766e").setFontColor("#ffffff").setFontWeight("bold");
   sheetBukuKas.setFrozenRows(1);
 
+  // 5. Sheet Hutang
+  var sheetHutang = ss.getSheetByName("Hutang");
+  if (!sheetHutang) {
+    sheetHutang = ss.insertSheet("Hutang");
+  }
+  var headersHutang = [
+    "Kode Hutang", "Waktu Catat", "ID Pelanggan", "Nama Pelanggan",
+    "Kategori", "Nominal (Rp)", "Stempel Tertahan", "Keterangan",
+    "Status", "Waktu Lunas", "Metode Lunas", "Kode Trx Lunas"
+  ];
+  sheetHutang.getRange(1, 1, 1, headersHutang.length).setValues([headersHutang]);
+  sheetHutang.getRange(1, 1, 1, headersHutang.length)
+    .setBackground("#d97706").setFontColor("#ffffff").setFontWeight("bold");
+  sheetHutang.setFrozenRows(1);
+
   // Hapus Sheet1 bawaan jika kosong
   var defaultSheet = ss.getSheetByName("Sheet1");
   if (defaultSheet && ss.getSheets().length > 1) {
     try { ss.deleteSheet(defaultSheet); } catch(e) {}
   }
 
-  Logger.log("Setup 4 Sheet SCS Digital Stamp Berhasil!");
+  Logger.log("Setup 5 Sheet SCS Digital Stamp Berhasil!");
 }
 
 function doGet(e) {
@@ -236,12 +251,14 @@ function doPost(e) {
       var sheetT = ss.getSheetByName("Transaksi");
       var sheetH = ss.getSheetByName("Penukaran_Hadiah");
       var sheetBK = ss.getSheetByName("Buku_Kas");
+      var sheetHT = ss.getSheetByName("Hutang");
       
       // Bersihkan data lama agar tidak duplikat (header baris 1 tetap ada)
       if (sheetP.getLastRow() > 1) sheetP.deleteRows(2, sheetP.getLastRow() - 1);
       if (sheetT.getLastRow() > 1) sheetT.deleteRows(2, sheetT.getLastRow() - 1);
       if (sheetH.getLastRow() > 1) sheetH.deleteRows(2, sheetH.getLastRow() - 1);
       if (sheetBK && sheetBK.getLastRow() > 1) sheetBK.deleteRows(2, sheetBK.getLastRow() - 1);
+      if (sheetHT && sheetHT.getLastRow() > 1) sheetHT.deleteRows(2, sheetHT.getLastRow() - 1);
 
       // Tulis Pelanggan
       if (data.customers && data.customers.length > 0) {
@@ -320,6 +337,27 @@ function doPost(e) {
         sheetBK.getRange(2, 1, rowsBK.length, rowsBK[0].length).setValues(rowsBK);
       }
 
+      // Tulis Hutang Pelanggan
+      if (sheetHT && data.debts && data.debts.length > 0) {
+        var rowsHT = data.debts.map(function(d) {
+          return [
+            d.debtCode,
+            d.createdAt,
+            d.customerId,
+            d.customerName,
+            d.categoryName || "Transaksi Toko",
+            Number(d.amount) || 0,
+            Number(d.pendingStamps) || 0,
+            d.description || "",
+            d.status || "unpaid",
+            d.settledAt || "",
+            d.settledMethod || "",
+            d.settledTransactionCode || d.settledTransactionId || ""
+          ];
+        });
+        sheetHT.getRange(2, 1, rowsHT.length, rowsHT[0].length).setValues(rowsHT);
+      }
+
       // Simpan Pengaturan Toko jika disertakan
       if (data.settings) {
         saveSettingsToSheet(ss, data.settings);
@@ -385,6 +423,79 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
+    // 8. Catat Hutang Baru Member
+    if (action === "add_debt") {
+      var sheetDebt = ss.getSheetByName("Hutang");
+      if (!sheetDebt) {
+        sheetDebt = ss.insertSheet("Hutang");
+        var hDebt = [
+          "Kode Hutang", "Waktu Catat", "ID Pelanggan", "Nama Pelanggan",
+          "Kategori", "Nominal (Rp)", "Stempel Tertahan", "Keterangan",
+          "Status", "Waktu Lunas", "Metode Lunas", "Kode Trx Lunas"
+        ];
+        sheetDebt.getRange(1, 1, 1, hDebt.length).setValues([hDebt]);
+        sheetDebt.getRange(1, 1, 1, hDebt.length).setBackground("#d97706").setFontColor("#ffffff").setFontWeight("bold");
+        sheetDebt.setFrozenRows(1);
+      }
+      var d = data.debt;
+      if (d) {
+        sheetDebt.appendRow([
+          d.debtCode,
+          d.createdAt,
+          d.customerId,
+          d.customerName,
+          d.categoryName || "Transaksi Toko",
+          Number(d.amount) || 0,
+          Number(d.pendingStamps) || 0,
+          d.description || "",
+          d.status || "unpaid",
+          d.settledAt || "",
+          d.settledMethod || "",
+          d.settledTransactionCode || d.settledTransactionId || ""
+        ]);
+      }
+      return ContentService.createTextOutput(JSON.stringify({ success: true, action: action }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 9. Lunasi Hutang Member
+    if (action === "settle_debt") {
+      var sheetSettleDebt = ss.getSheetByName("Hutang");
+      var targetDebtCode = String(data.debtCode || "").trim();
+      if (sheetSettleDebt && sheetSettleDebt.getLastRow() > 1 && targetDebtCode) {
+        var debtCodes = sheetSettleDebt.getRange(2, 1, sheetSettleDebt.getLastRow() - 1, 1).getValues();
+        for (var dIdx = 0; dIdx < debtCodes.length; dIdx++) {
+          if (String(debtCodes[dIdx][0] || "").trim() === targetDebtCode) {
+            var dRow = dIdx + 2;
+            sheetSettleDebt.getRange(dRow, 9).setValue("paid");
+            sheetSettleDebt.getRange(dRow, 10).setValue(data.settledAt || new Date().toISOString());
+            sheetSettleDebt.getRange(dRow, 11).setValue(data.settledMethod || "cash");
+            sheetSettleDebt.getRange(dRow, 12).setValue(data.settledTransactionCode || "");
+            break;
+          }
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({ success: true, action: action }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 10. Batalkan Catatan Hutang Member
+    if (action === "cancel_debt") {
+      var sheetCancelDebt = ss.getSheetByName("Hutang");
+      var cancelDebtCode = String(data.debtCode || "").trim();
+      if (sheetCancelDebt && sheetCancelDebt.getLastRow() > 1 && cancelDebtCode) {
+        var cDebtCodes = sheetCancelDebt.getRange(2, 1, sheetCancelDebt.getLastRow() - 1, 1).getValues();
+        for (var cIdx = 0; cIdx < cDebtCodes.length; cIdx++) {
+          if (String(cDebtCodes[cIdx][0] || "").trim() === cancelDebtCode) {
+            sheetCancelDebt.getRange(cIdx + 2, 9).setValue("cancelled");
+            break;
+          }
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({ success: true, action: action }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     return ContentService.createTextOutput(JSON.stringify({ success: true }))
       .setMimeType(ContentService.MimeType.JSON);
 
@@ -443,6 +554,7 @@ function getAllDataFromSheets(ss) {
     transactions: [],
     redemptions: [],
     cashBook: [],
+    debts: [],
     settings: null,
     timestamp: new Date().toISOString()
   };
@@ -569,6 +681,39 @@ function getAllDataFromSheets(ss) {
           sourceTransactionId: rbk[6] ? String(rbk[6]).trim() : undefined,
           createdBy: String(rbk[7] || "Admin SCS").trim(),
           createdAt: isoDate
+        });
+      }
+    }
+  }
+
+  // 5. Baca Sheet Hutang
+  var sheetHT = ss.getSheetByName("Hutang");
+  if (sheetHT && sheetHT.getLastRow() > 1) {
+    var colCountHT = Math.min(12, Math.max(8, sheetHT.getLastColumn()));
+    var rowsHT = sheetHT.getRange(2, 1, sheetHT.getLastRow() - 1, colCountHT).getValues();
+    for (var h = 0; h < rowsHT.length; h++) {
+      var rht = rowsHT[h];
+      if (rht[0] || rht[2]) {
+        var hCode = String(rht[0] || "").trim();
+        var rawStatus = rht[8] ? String(rht[8]).trim().toLowerCase() : "unpaid";
+        var resolvedStatus = (rawStatus === "paid" || rawStatus === "cancelled") ? rawStatus : "unpaid";
+        var rawSettleMethod = rht[10] ? String(rht[10]).trim().toLowerCase() : "";
+        result.debts.push({
+          id: "htg-" + hCode,
+          debtCode: hCode,
+          createdAt: rht[1] ? new Date(rht[1]).toISOString() : new Date().toISOString(),
+          customerId: String(rht[2] || "").trim(),
+          customerName: String(rht[3] || "").trim(),
+          categoryId: "cat-general",
+          categoryName: String(rht[4] || "Transaksi Toko").trim(),
+          amount: Number(rht[5]) || 0,
+          pendingStamps: Number(rht[6]) || 0,
+          description: String(rht[7] || "").trim(),
+          status: resolvedStatus,
+          settledAt: rht[9] ? new Date(rht[9]).toISOString() : undefined,
+          settledMethod: (rawSettleMethod === "cash" || rawSettleMethod === "qris") ? rawSettleMethod : undefined,
+          settledTransactionId: rht[11] ? String(rht[11]).trim() : undefined,
+          createdBy: "Admin SCS"
         });
       }
     }

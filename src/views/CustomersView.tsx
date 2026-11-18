@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Users, Search, UserPlus, QrCode, Stamp, Gift, Phone, Calendar, ArrowRight, Eye, Edit2, CheckCircle2, XCircle, ExternalLink, Copy, Check, Clock } from 'lucide-react';
-import { Customer, StampLedger, Transaction, StoreSettings } from '../types';
+import { Customer, StampLedger, CustomerDebt, StoreSettings } from '../types';
 import { getCustomerStampBalance, formatDate, formatRupiah } from '../utils/storage';
 import { StampCard } from '../components/StampCard';
 import { WhatsAppButton, WhatsAppIcon } from '../components/WhatsAppButton';
@@ -13,7 +13,7 @@ import {
 interface Props {
   customers: Customer[];
   ledgers: StampLedger[];
-  transactions: Transaction[];
+  debts?: CustomerDebt[];
   settings: StoreSettings;
   onAddCustomer: () => void;
   onEditCustomer: (customer: Customer) => void;
@@ -27,7 +27,7 @@ interface Props {
 export const CustomersView: React.FC<Props> = ({
   customers,
   ledgers,
-  transactions,
+  debts = [],
   settings,
   onAddCustomer,
   onEditCustomer,
@@ -41,25 +41,21 @@ export const CustomersView: React.FC<Props> = ({
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'reward_ready' | 'unpaid_debt'>('all');
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
-  const isTrxUnpaid = (t: Transaction) =>
-    t.status === 'confirmed' &&
-    (t.paymentStatus === 'unpaid' || (t.paymentMethod === 'hutang' && t.paymentStatus !== 'paid'));
-
   const customerItems = customers.map(c => {
     const balance = getCustomerStampBalance(c.id, ledgers);
-    const unpaidTrxs = transactions.filter(
-      t =>
-        isTrxUnpaid(t) &&
-        (t.customerId === c.id ||
-          t.customerId === c.customerCode ||
-          t.customerName.toLowerCase().trim() === c.name.toLowerCase().trim())
+    const unpaidDebts = debts.filter(
+      d =>
+        d.status === 'unpaid' &&
+        (d.customerId === c.id ||
+          d.customerId === c.customerCode ||
+          d.customerName.toLowerCase().trim() === c.name.toLowerCase().trim())
     );
-    const unpaidTotal = unpaidTrxs.reduce((sum, t) => sum + t.amount, 0);
+    const unpaidTotal = unpaidDebts.reduce((sum, d) => sum + d.amount, 0);
     return {
       ...c,
       balance,
       isRewardReady: balance >= (settings.rewardRequiredStamps || 25),
-      unpaidTrxs,
+      unpaidDebts,
       unpaidTotal,
     };
   });
@@ -74,7 +70,7 @@ export const CustomersView: React.FC<Props> = ({
 
     if (filterStatus === 'active') return c.status === 'active';
     if (filterStatus === 'reward_ready') return c.isRewardReady && c.status === 'active';
-    if (filterStatus === 'unpaid_debt') return c.unpaidTrxs.length > 0;
+    if (filterStatus === 'unpaid_debt') return c.unpaidDebts.length > 0;
     return true;
   });
 
@@ -153,7 +149,7 @@ export const CustomersView: React.FC<Props> = ({
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            Punya Hutang ({customerItems.filter(c => c.unpaidTrxs.length > 0).length})
+            Punya Hutang ({customerItems.filter(c => c.unpaidDebts.length > 0).length})
           </button>
           <button
             onClick={() => setFilterStatus('active')}
@@ -285,7 +281,7 @@ export const CustomersView: React.FC<Props> = ({
                     </div>
                   </div>
 
-                  {customer.unpaidTrxs.length > 0 && (
+                  {customer.unpaidDebts.length > 0 && (
                     <div className="mt-2.5 p-2.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-[11px] font-bold text-amber-900 flex items-center gap-1 truncate">
@@ -293,7 +289,7 @@ export const CustomersView: React.FC<Props> = ({
                           <span>Hutang: {formatRupiah(customer.unpaidTotal)}</span>
                         </p>
                         <p className="text-[10px] text-amber-700">
-                          {customer.unpaidTrxs.length} nota belum lunas
+                          {customer.unpaidDebts.length} nota belum lunas
                         </p>
                       </div>
                       <button
@@ -301,7 +297,7 @@ export const CustomersView: React.FC<Props> = ({
                         onClick={() => {
                           const msg = createConsolidatedDebtReminderWAMessage(
                             customer,
-                            customer.unpaidTrxs,
+                            customer.unpaidDebts,
                             settings
                           );
                           sendWhatsAppMessage(customer.phone, msg);
@@ -396,12 +392,12 @@ export const CustomersView: React.FC<Props> = ({
                 />
 
                 {(() => {
-                  const selUnpaid = transactions.filter(
-                    t =>
-                      isTrxUnpaid(t) &&
-                      (t.customerId === selectedCustomer.id ||
-                        t.customerId === selectedCustomer.customerCode ||
-                        t.customerName.toLowerCase().trim() === selectedCustomer.name.toLowerCase().trim())
+                  const selUnpaid = debts.filter(
+                    d =>
+                      d.status === 'unpaid' &&
+                      (d.customerId === selectedCustomer.id ||
+                        d.customerId === selectedCustomer.customerCode ||
+                        d.customerName.toLowerCase().trim() === selectedCustomer.name.toLowerCase().trim())
                   );
                   if (selUnpaid.length === 0) return null;
                   return (

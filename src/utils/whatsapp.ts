@@ -1,4 +1,4 @@
-import { Customer, Transaction, Redemption, StoreSettings } from '../types';
+import { Customer, Transaction, Redemption, StoreSettings, CustomerDebt } from '../types';
 import { formatRupiah, formatDate } from './storage';
 
 /**
@@ -112,23 +112,73 @@ Telp/WA: ${settings.storePhone}`;
 /**
  * Creates formatted WhatsApp reminder message for unpaid debt
  */
-export function createDebtReminderWAMessage(
+export type DebtLike =
+  | CustomerDebt
+  | {
+      debtCode?: string;
+      transactionCode?: string;
+      createdAt: string;
+      categoryName?: string;
+      description?: string;
+      amount: number;
+      pendingStamps?: number;
+    };
+
+/**
+ * Creates formatted WhatsApp notification when a new debt is recorded for a member
+ */
+export function createDebtCreatedWAMessage(
   customer: Customer,
-  transaction: Transaction,
+  debt: CustomerDebt,
+  currentBalance: number,
   settings: StoreSettings
 ): string {
-  const heldStamps = transaction.pendingStamps ?? 0;
+  const targetStamps = settings.rewardRequiredStamps || 25;
+  const heldStamps = debt.pendingStamps ?? 0;
+
+  return `🧾 *CATATAN HUTANG MEMBER - ${settings.storeName.toUpperCase()}*
+----------------------------------------
+Halo Kak *${customer.name}* (ID: ${customer.customerCode}),
+Berikut rincian transaksi Anda yang tercatat di daftar *Hutang / Bayar Nanti*:
+
+📋 *Rincian Catatan:*
+• Layanan: ${debt.description || debt.categoryName || 'Transaksi Toko'}
+• Nominal Tagihan: *${formatRupiah(debt.amount)}*
+• Kode Hutang: ${debt.debtCode}
+• Waktu: ${formatDate(debt.createdAt)}
+
+⏳ *Status Pembayaran:* *BELUM LUNAS*
+⭐ *Stempel Tertahan:* *+${heldStamps} Stempel* (otomatis masuk setelah hutang dilunasi)
+🎯 *Saldo Stempel Aktif:* *${currentBalance} / ${targetStamps} Stempel*
+----------------------------------------
+Terima kasih! Stempel akan langsung ditambahkan begitu pembayaran diselesaikan via Cash atau QRIS.
+
+📍 *${settings.storeName}*
+${settings.storeAddress}
+Telp/WA: ${settings.storePhone}`;
+}
+
+/**
+ * Creates formatted WhatsApp reminder message for unpaid debt
+ */
+export function createDebtReminderWAMessage(
+  customer: Customer,
+  debt: DebtLike,
+  settings: StoreSettings
+): string {
+  const heldStamps = debt.pendingStamps ?? 0;
+  const code = 'debtCode' in debt && debt.debtCode ? debt.debtCode : ('transactionCode' in debt ? debt.transactionCode : '');
   return `📌 *PENGINGAT TAGIHAN - ${settings.storeName.toUpperCase()}*
 ----------------------------------------
 Halo Kak *${customer.name}* (ID: ${customer.customerCode}),
-Menginformasikan rincian transaksi yang belum diselesaikan di ${settings.storeName}:
+Menginformasikan rincian tagihan yang belum diselesaikan di ${settings.storeName}:
 
-• Kode Trx: ${transaction.transactionCode}
-• Tanggal: ${formatDate(transaction.createdAt)}
-• Layanan: ${transaction.description || transaction.categoryName || 'Transaksi Toko'}
-• Total Tagihan: *${formatRupiah(transaction.amount)}*
+• Kode Catatan: ${code}
+• Tanggal: ${formatDate(debt.createdAt)}
+• Layanan: ${debt.description || debt.categoryName || 'Transaksi Toko'}
+• Total Tagihan: *${formatRupiah(debt.amount)}*
 ${heldStamps > 0 ? `• Stempel Tertahan: *+${heldStamps} stempel* (langsung masuk saat lunas)\n` : ''}
-Pembayaran dapat dilakukan secara tunai di kasir atau via QRIS. Terima kasih!
+Pembayaran dapat dilakukan secara tunai (Cash) di kasir atau via QRIS. Terima kasih!
 
 📍 *${settings.storeName}*
 ${settings.storeAddress}
@@ -140,27 +190,28 @@ Telp/WA: ${settings.storePhone}`;
  */
 export function createConsolidatedDebtReminderWAMessage(
   customer: Customer,
-  unpaidTransactions: Transaction[],
+  unpaidDebts: DebtLike[],
   settings: StoreSettings
 ): string {
-  if (unpaidTransactions.length === 1) {
-    return createDebtReminderWAMessage(customer, unpaidTransactions[0], settings);
+  if (unpaidDebts.length === 1) {
+    return createDebtReminderWAMessage(customer, unpaidDebts[0], settings);
   }
 
-  const totalAmount = unpaidTransactions.reduce((sum, t) => sum + t.amount, 0);
-  const totalHeld = unpaidTransactions.reduce((sum, t) => sum + (t.pendingStamps || 0), 0);
+  const totalAmount = unpaidDebts.reduce((sum, t) => sum + t.amount, 0);
+  const totalHeld = unpaidDebts.reduce((sum, t) => sum + (t.pendingStamps || 0), 0);
 
-  const lines = unpaidTransactions
+  const lines = unpaidDebts
     .map((t, idx) => {
       const label = t.description || t.categoryName || 'Transaksi Toko';
-      return `${idx + 1}. *${formatRupiah(t.amount)}* — ${label} (${t.transactionCode}, ${formatDate(t.createdAt)})`;
+      const code = 'debtCode' in t && t.debtCode ? t.debtCode : ('transactionCode' in t ? t.transactionCode : '');
+      return `${idx + 1}. *${formatRupiah(t.amount)}* — ${label} (${code}, ${formatDate(t.createdAt)})`;
     })
     .join('\n');
 
   return `📌 *PENGINGAT TAGIHAN - ${settings.storeName.toUpperCase()}*
 ----------------------------------------
 Halo Kak *${customer.name}* (ID: ${customer.customerCode}),
-Menginformasikan total *${unpaidTransactions.length} nota transaksi* yang belum diselesaikan di ${settings.storeName}:
+Menginformasikan total *${unpaidDebts.length} catatan hutang* yang belum diselesaikan di ${settings.storeName}:
 
 ${lines}
 

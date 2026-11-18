@@ -54,6 +54,35 @@ Anda berhak menukarkan *1 ${settings.defaultRewardName}* gratis di kasir ${setti
       ? `• Catatan: ${transaction.description}\n`
       : '';
 
+  if (transaction.paymentStatus === 'unpaid' || transaction.paymentMethod === 'hutang' && transaction.paymentStatus !== 'paid') {
+    const heldStamps = transaction.pendingStamps ?? 0;
+    return `🧾 *CATATAN TRANSAKSI (BELUM LUNAS) - ${settings.storeName.toUpperCase()}*
+----------------------------------------
+Halo Kak *${customer.name}* (ID: ${customer.customerCode}),
+Berikut rincian transaksi Anda yang tercatat sebagai *Hutang / Bayar Nanti*:
+
+📋 *Rincian Transaksi:*
+• Layanan: ${serviceName}
+• Nominal Tagihan: *${formatRupiah(transaction.amount)}*
+${noteLine}• Kode Trx: ${transaction.transactionCode}
+• Waktu: ${formatDate(transaction.createdAt)}
+
+⏳ *Status Pembayaran:* *BELUM LUNAS*
+⭐ *Stempel Tertahan:* *+${heldStamps} Stempel* (otomatis masuk setelah tagihan dilunasi)
+🎯 *Saldo Stempel Aktif:* *${newBalance} / ${targetStamps} Stempel*
+----------------------------------------
+Terima kasih! Stempel akan langsung ditambahkan begitu pembayaran diselesaikan.
+
+📍 *${settings.storeName}*
+${settings.storeAddress}
+Telp/WA: ${settings.storePhone}`;
+  }
+
+  const payLabel =
+    transaction.paymentMethod === 'qris' || transaction.settledMethod === 'qris'
+      ? 'QRIS'
+      : 'Cash (Tunai)';
+
   const message = `🧾 *STRUK DIGITAL STEMPEL - ${settings.storeName.toUpperCase()}*
 ----------------------------------------
 Halo Kak *${customer.name}* (ID: ${customer.customerCode}),
@@ -61,9 +90,9 @@ Terima kasih telah bertransaksi di ${settings.storeName}!
 
 📋 *Rincian Transaksi:*
 • Layanan: ${serviceName}
-• Nominal: ${formatRupiah(transaction.amount)}
+• Nominal: ${formatRupiah(transaction.amount)} (${payLabel})
 ${noteLine}• Kode Trx: ${transaction.transactionCode}
-• Waktu: ${formatDate(transaction.createdAt)}
+• Waktu: ${formatDate(transaction.settledAt || transaction.createdAt)}
 
 ⭐ *Stempel Didapat:* *+${transaction.stampEarned} Stempel*
 🎯 *Total Saldo Stempel:* *${newBalance} / ${targetStamps} Stempel*
@@ -78,6 +107,71 @@ ${settings.storeAddress}
 Telp/WA: ${settings.storePhone}`;
 
   return message;
+}
+
+/**
+ * Creates formatted WhatsApp reminder message for unpaid debt
+ */
+export function createDebtReminderWAMessage(
+  customer: Customer,
+  transaction: Transaction,
+  settings: StoreSettings
+): string {
+  const heldStamps = transaction.pendingStamps ?? 0;
+  return `📌 *PENGINGAT TAGIHAN - ${settings.storeName.toUpperCase()}*
+----------------------------------------
+Halo Kak *${customer.name}* (ID: ${customer.customerCode}),
+Menginformasikan rincian transaksi yang belum diselesaikan di ${settings.storeName}:
+
+• Kode Trx: ${transaction.transactionCode}
+• Tanggal: ${formatDate(transaction.createdAt)}
+• Layanan: ${transaction.description || transaction.categoryName || 'Transaksi Toko'}
+• Total Tagihan: *${formatRupiah(transaction.amount)}*
+${heldStamps > 0 ? `• Stempel Tertahan: *+${heldStamps} stempel* (langsung masuk saat lunas)\n` : ''}
+Pembayaran dapat dilakukan secara tunai di kasir atau via QRIS. Terima kasih!
+
+📍 *${settings.storeName}*
+${settings.storeAddress}
+Telp/WA: ${settings.storePhone}`;
+}
+
+/**
+ * Creates consolidated WhatsApp reminder message for one or multiple unpaid debts of a customer
+ */
+export function createConsolidatedDebtReminderWAMessage(
+  customer: Customer,
+  unpaidTransactions: Transaction[],
+  settings: StoreSettings
+): string {
+  if (unpaidTransactions.length === 1) {
+    return createDebtReminderWAMessage(customer, unpaidTransactions[0], settings);
+  }
+
+  const totalAmount = unpaidTransactions.reduce((sum, t) => sum + t.amount, 0);
+  const totalHeld = unpaidTransactions.reduce((sum, t) => sum + (t.pendingStamps || 0), 0);
+
+  const lines = unpaidTransactions
+    .map((t, idx) => {
+      const label = t.description || t.categoryName || 'Transaksi Toko';
+      return `${idx + 1}. *${formatRupiah(t.amount)}* — ${label} (${t.transactionCode}, ${formatDate(t.createdAt)})`;
+    })
+    .join('\n');
+
+  return `📌 *PENGINGAT TAGIHAN - ${settings.storeName.toUpperCase()}*
+----------------------------------------
+Halo Kak *${customer.name}* (ID: ${customer.customerCode}),
+Menginformasikan total *${unpaidTransactions.length} nota transaksi* yang belum diselesaikan di ${settings.storeName}:
+
+${lines}
+
+----------------------------------------
+💰 *Total Tagihan:* *${formatRupiah(totalAmount)}*
+${totalHeld > 0 ? `⭐ *Stempel Tertahan:* *+${totalHeld} stempel* (otomatis masuk setelah lunas)\n` : ''}
+Pembayaran dapat dilakukan secara tunai (Cash) di kasir atau via QRIS. Terima kasih banyak!
+
+📍 *${settings.storeName}*
+${settings.storeAddress}
+Telp/WA: ${settings.storePhone}`;
 }
 
 /**

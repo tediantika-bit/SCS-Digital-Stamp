@@ -20,6 +20,7 @@ import {
   Smartphone,
   Store,
   RefreshCw,
+  BookOpen,
 } from 'lucide-react';
 
 import {
@@ -30,6 +31,9 @@ import {
   Redemption,
   TransactionCategory,
   StoreSettings,
+  CashBookEntry,
+  CashBookEntryType,
+  PaymentMethod,
 } from './types';
 import {
   loadAppData,
@@ -42,9 +46,12 @@ import {
 import { sound } from './utils/audio';
 import {
   sendTransactionToGoogleSheets,
+  sendTransactionSettlementToGoogleSheets,
   sendCustomerToGoogleSheets,
   sendRedemptionToGoogleSheets,
   sendSettingsToGoogleSheets,
+  sendCashEntryToGoogleSheets,
+  deleteCashEntryFromGoogleSheets,
   fetchDataFromGoogleSheets,
 } from './utils/googleSheets';
 
@@ -56,6 +63,7 @@ import { TransactionsView } from './views/TransactionsView';
 import { RewardsView } from './views/RewardsView';
 import { ReportsView } from './views/ReportsView';
 import { SettingsView } from './views/SettingsView';
+import { BukuKasView } from './views/BukuKasView';
 import { PublicCardView } from './views/PublicCardView';
 import { LoginModal } from './views/LoginModal';
 
@@ -71,6 +79,7 @@ type AdminTab =
   | 'cashier'
   | 'customers'
   | 'transactions'
+  | 'cashbook'
   | 'rewards'
   | 'reports'
   | 'settings';
@@ -263,7 +272,7 @@ export default function App() {
                 balanceAfter: 0,
                 description: `Stempel transaksi ${t.transactionCode}`,
                 createdBy: t.createdBy || 'Admin SCS',
-                createdAt: t.createdAt,
+                createdAt: t.settledAt || t.createdAt,
               });
             });
 
@@ -328,12 +337,30 @@ export default function App() {
               : rew
           );
 
+          // Merge cashBook entries by entryCode (keep local unsynced entries)
+          const cashMap = new Map<string, CashBookEntry>();
+          prev.cashBook.forEach(b => {
+            cashMap.set(b.entryCode, b);
+          });
+          (pulled.cashBook || []).forEach(b => {
+            const existing = cashMap.get(b.entryCode);
+            cashMap.set(b.entryCode, {
+              ...existing,
+              ...b,
+              id: existing?.id || b.id,
+            });
+          });
+          const mergedCashBook = Array.from(cashMap.values()).sort(
+            (a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime()
+          );
+
           const next = {
             ...prev,
             customers: mergedCustomers,
             transactions: mergedTransactions,
             ledgers: rebuiltLedgers,
             redemptions: mergedRedemptions,
+            cashBook: mergedCashBook,
             rewards: updatedRewards,
             settings: mergedSettings,
           };
@@ -378,11 +405,16 @@ export default function App() {
     categoryName: string;
     amount: number;
     stampEarned: number;
+    paymentMethod?: PaymentMethod;
     description: string;
   }) => {
     const nowIso = new Date().toISOString();
     const dateCode = nowIso.slice(0, 10).replace(/-/g, '');
     const countSeq = String(data.transactions.length + 1).padStart(3, '0');
+    const payMethod: PaymentMethod = trxInput.paymentMethod || 'cash';
+    const isHutang = payMethod === 'hutang';
+    const awardedStamps = isHutang ? 0 : trxInput.stampEarned;
+    const heldStamps = isHutang ? trxInput.stampEarned : 0;
 
     const newTransaction: Transaction = {
       id: generateId('trx'),
@@ -392,7 +424,10 @@ export default function App() {
       categoryId: trxInput.categoryId,
       categoryName: trxInput.categoryName,
       amount: trxInput.amount,
-      stampEarned: trxInput.stampEarned,
+      stampEarned: awardedStamps,
+      pendingStamps: heldStamps,
+      paymentMethod: payMethod,
+      paymentStatus: isHutang ? 'unpaid' : 'paid',
       status: 'confirmed',
       description: trxInput.description,
       createdBy: 'Admin SCS',
@@ -400,25 +435,56 @@ export default function App() {
     };
 
     const curBal = getCustomerStampBalance(trxInput.customerId, data.ledgers);
-    const newBal = curBal + trxInput.stampEarned;
+    const newBal = curBal + awardedStamps;
 
-    const newLedger: StampLedger = {
-      id: generateId('ldg'),
-      customerId: trxInput.customerId,
-      transactionId: newTransaction.id,
-      type: 'earn',
-      amount: trxInput.stampEarned,
-      balanceAfter: newBal,
-      description: `Stempel transaksi ${trxInput.categoryName} (${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(trxInput.amount)})`,
-      createdBy: 'Admin SCS',
-      createdAt: nowIso,
-    };
+    const newLedger: StampLedger | null =
+      !isHutang && awardedStamps > 0
+        ? {
+            id: generateId('ldg'),
+            customerId: trxInput.customerId,
+            transactionId: newTransaction.id,
+            type: 'earn',
+            amount: awardedStamps,
+            balanceAfter: newBal,
+            description: `Stempel transaksi ${trxInput.categoryName} (${new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(trxInput.amount)})`,
+            createdBy: 'Admin SCS',
+            createdAt: nowIso,
+          }
+        : null;
+
+    // Automatically record into Buku Kas Umum if paymentMethod === 'cash'
+    let newCashEntry: CashBookEntry | null = null;
+    if (payMethod === 'cash' && trxInput.amount > 0) {
+      const bkuPrefix = `BKU-${dateCode}-`;
+      const maxBkuSeq = data.cashBook
+        .filter(e => e.entryCode.startsWith(bkuPrefix))
+        .reduce((max, e) => Math.max(max, parseInt(e.entryCode.replace(bkuPrefix, ''), 10) || 0), 0);
+      const bkuSeq = String(maxBkuSeq + 1).padStart(3, '0');
+      newCashEntry = {
+        id: generateId('bku'),
+        entryCode: `${bkuPrefix}${bkuSeq}`,
+        date: nowIso,
+        type: 'in',
+        category: 'Transaksi Pelanggan',
+        description: `${trxInput.customerName} · ${trxInput.description || trxInput.categoryName}`,
+        amount: trxInput.amount,
+        sourceTransactionId: newTransaction.id,
+        createdBy: 'Admin SCS',
+        createdAt: nowIso,
+      };
+    }
 
     const nextTransactions = [newTransaction, ...data.transactions];
-    const nextLedgers = [newLedger, ...data.ledgers];
+    const nextLedgers = newLedger ? [newLedger, ...data.ledgers] : data.ledgers;
+    const nextCashBook = newCashEntry ? [newCashEntry, ...data.cashBook] : data.cashBook;
 
     setData(prev => {
-      const next = { ...prev, transactions: nextTransactions, ledgers: nextLedgers };
+      const next = {
+        ...prev,
+        transactions: nextTransactions,
+        ledgers: nextLedgers,
+        cashBook: nextCashBook,
+      };
       saveAppData(next);
       return next;
     });
@@ -426,12 +492,164 @@ export default function App() {
     // Background sync to Google Spreadsheet if configured
     if (data.settings.googleSheetsScriptUrl) {
       sendTransactionToGoogleSheets(data.settings.googleSheetsScriptUrl, newTransaction, newBal);
+      if (newCashEntry) {
+        sendCashEntryToGoogleSheets(data.settings.googleSheetsScriptUrl, newCashEntry);
+      }
     }
 
     return newTransaction;
   };
 
-  // Transaction Cancellation (with stamp reversal)
+  // Settle Hutang (Single Full Payment -> Award Held Stamps + Record Cash Entry if Cash)
+  const handleSettleDebt = (
+    transactionId: string,
+    settledMethod: 'cash' | 'qris'
+  ): { transaction: Transaction; newBalance: number } | undefined => {
+    const target = data.transactions.find(t => t.id === transactionId);
+    if (
+      !target ||
+      target.status !== 'confirmed' ||
+      (target.paymentStatus !== 'unpaid' && !(target.paymentMethod === 'hutang' && target.paymentStatus !== 'paid'))
+    ) {
+      return undefined;
+    }
+
+    const nowIso = new Date().toISOString();
+    const dateCode = nowIso.slice(0, 10).replace(/-/g, '');
+    const stampsToAward = target.pendingStamps ?? target.stampEarned ?? 0;
+    const curBal = getCustomerStampBalance(target.customerId, data.ledgers);
+    const newBal = curBal + stampsToAward;
+
+    const updatedTransaction: Transaction = {
+      ...target,
+      paymentStatus: 'paid',
+      stampEarned: stampsToAward,
+      settledAt: nowIso,
+      settledMethod,
+    };
+
+    const earnLedger: StampLedger | null =
+      stampsToAward > 0
+        ? {
+            id: generateId('ldg'),
+            customerId: target.customerId,
+            transactionId: target.id,
+            type: 'earn',
+            amount: stampsToAward,
+            balanceAfter: newBal,
+            description: `Pelunasan hutang ${target.transactionCode}`,
+            createdBy: 'Admin SCS',
+            createdAt: nowIso,
+          }
+        : null;
+
+    let newCashEntry: CashBookEntry | null = null;
+    if (settledMethod === 'cash' && target.amount > 0) {
+      const bkuPrefix = `BKU-${dateCode}-`;
+      const maxBkuSeq = data.cashBook
+        .filter(e => e.entryCode.startsWith(bkuPrefix))
+        .reduce((max, e) => Math.max(max, parseInt(e.entryCode.replace(bkuPrefix, ''), 10) || 0), 0);
+      const bkuSeq = String(maxBkuSeq + 1).padStart(3, '0');
+      newCashEntry = {
+        id: generateId('bku'),
+        entryCode: `${bkuPrefix}${bkuSeq}`,
+        date: nowIso,
+        type: 'in',
+        category: 'Pelunasan Hutang',
+        description: `${target.customerName} · Pelunasan ${target.transactionCode}`,
+        amount: target.amount,
+        sourceTransactionId: target.id,
+        createdBy: 'Admin SCS',
+        createdAt: nowIso,
+      };
+    }
+
+    const nextTransactions = data.transactions.map(t =>
+      t.id === transactionId ? updatedTransaction : t
+    );
+    const nextLedgers = earnLedger ? [earnLedger, ...data.ledgers] : data.ledgers;
+    const nextCashBook = newCashEntry ? [newCashEntry, ...data.cashBook] : data.cashBook;
+
+    setData(prev => {
+      const next = {
+        ...prev,
+        transactions: nextTransactions,
+        ledgers: nextLedgers,
+        cashBook: nextCashBook,
+      };
+      saveAppData(next);
+      return next;
+    });
+
+    if (data.settings.googleSheetsScriptUrl) {
+      sendTransactionSettlementToGoogleSheets(
+        data.settings.googleSheetsScriptUrl,
+        updatedTransaction,
+        newBal
+      );
+      if (newCashEntry) {
+        sendCashEntryToGoogleSheets(data.settings.googleSheetsScriptUrl, newCashEntry);
+      }
+    }
+
+    return { transaction: updatedTransaction, newBalance: newBal };
+  };
+
+  // Manual Buku Kas Umum Entry Handlers
+  const handleAddCashEntry = (input: {
+    type: CashBookEntryType;
+    category: string;
+    description: string;
+    amount: number;
+    date: string;
+  }) => {
+    const nowIso = new Date().toISOString();
+    const datePart = (input.date || nowIso).slice(0, 10).replace(/-/g, '');
+    const bkuPrefix = `BKU-${datePart}-`;
+    const maxSeq = data.cashBook
+      .filter(e => e.entryCode.startsWith(bkuPrefix))
+      .reduce((max, e) => Math.max(max, parseInt(e.entryCode.replace(bkuPrefix, ''), 10) || 0), 0);
+    const seq = String(maxSeq + 1).padStart(3, '0');
+
+    const newEntry: CashBookEntry = {
+      id: generateId('bku'),
+      entryCode: `${bkuPrefix}${seq}`,
+      date: input.date || nowIso,
+      type: input.type,
+      category: input.category,
+      description: input.description,
+      amount: input.amount,
+      createdBy: 'Admin SCS',
+      createdAt: nowIso,
+    };
+
+    setData(prev => {
+      const next = { ...prev, cashBook: [newEntry, ...prev.cashBook] };
+      saveAppData(next);
+      return next;
+    });
+
+    if (data.settings.googleSheetsScriptUrl) {
+      sendCashEntryToGoogleSheets(data.settings.googleSheetsScriptUrl, newEntry);
+    }
+  };
+
+  const handleDeleteCashEntry = (entryId: string) => {
+    const target = data.cashBook.find(e => e.id === entryId);
+    if (!target) return;
+
+    setData(prev => {
+      const next = { ...prev, cashBook: prev.cashBook.filter(e => e.id !== entryId) };
+      saveAppData(next);
+      return next;
+    });
+
+    if (data.settings.googleSheetsScriptUrl) {
+      deleteCashEntryFromGoogleSheets(data.settings.googleSheetsScriptUrl, target.entryCode);
+    }
+  };
+
+  // Transaction Cancellation (with stamp reversal & linked cash entry cleanup)
   const handleCancelTransaction = (transactionId: string, reason: string) => {
     const target = data.transactions.find(t => t.id === transactionId);
     if (!target || target.status === 'cancelled') return;
@@ -440,28 +658,44 @@ export default function App() {
     const curBal = getCustomerStampBalance(target.customerId, data.ledgers);
     const newBal = Math.max(0, curBal - target.stampEarned);
 
-    const reversalLedger: StampLedger = {
-      id: generateId('ldg-rev'),
-      customerId: target.customerId,
-      transactionId: target.id,
-      type: 'reversal',
-      amount: -target.stampEarned,
-      balanceAfter: newBal,
-      description: `Pembalikan stempel transaksi ${target.transactionCode} (${reason})`,
-      createdBy: 'Admin SCS',
-      createdAt: nowIso,
-    };
+    const reversalLedger: StampLedger | null =
+      target.stampEarned > 0
+        ? {
+            id: generateId('ldg-rev'),
+            customerId: target.customerId,
+            transactionId: target.id,
+            type: 'reversal',
+            amount: -target.stampEarned,
+            balanceAfter: newBal,
+            description: `Pembalikan stempel transaksi ${target.transactionCode} (${reason})`,
+            createdBy: 'Admin SCS',
+            createdAt: nowIso,
+          }
+        : null;
 
     const updatedTransactions = data.transactions.map(t =>
       t.id === transactionId ? ({ ...t, status: 'cancelled' as const } as Transaction) : t
     );
-    const updatedLedgers = [reversalLedger, ...data.ledgers];
+    const updatedLedgers = reversalLedger ? [reversalLedger, ...data.ledgers] : data.ledgers;
+    const linkedCash = data.cashBook.filter(e => e.sourceTransactionId === transactionId);
+    const updatedCashBook = data.cashBook.filter(e => e.sourceTransactionId !== transactionId);
 
     setData(prev => {
-      const next = { ...prev, transactions: updatedTransactions, ledgers: updatedLedgers };
+      const next = {
+        ...prev,
+        transactions: updatedTransactions,
+        ledgers: updatedLedgers,
+        cashBook: updatedCashBook,
+      };
       saveAppData(next);
       return next;
     });
+
+    if (data.settings.googleSheetsScriptUrl && linkedCash.length > 0) {
+      linkedCash.forEach(entry => {
+        deleteCashEntryFromGoogleSheets(data.settings.googleSheetsScriptUrl, entry.entryCode);
+      });
+    }
   };
 
   // Redemption Handler (deducts 25 stamps, keeps surplus)
@@ -725,7 +959,22 @@ export default function App() {
             ledgers={data.ledgers}
             settings={data.settings}
             onCancelTransaction={handleCancelTransaction}
+            onSettleDebt={handleSettleDebt}
             onNewTransaction={() => setActiveTab('cashier')}
+          />
+        );
+
+      case 'cashbook':
+        return (
+          <BukuKasView
+            entries={data.cashBook}
+            transactions={data.transactions}
+            customers={data.customers}
+            ledgers={data.ledgers}
+            settings={data.settings}
+            onAddEntry={handleAddCashEntry}
+            onDeleteEntry={handleDeleteCashEntry}
+            onSettleDebt={handleSettleDebt}
           />
         );
 
@@ -766,6 +1015,7 @@ export default function App() {
             transactions={data.transactions}
             redemptions={data.redemptions}
             ledgers={data.ledgers}
+            cashBook={data.cashBook}
             onSaveSettings={handleSaveSettings}
             onSaveCategories={handleSaveCategories}
             onResetData={handleResetData}
@@ -845,6 +1095,14 @@ export default function App() {
               }`}
             >
               Riwayat
+            </button>
+            <button
+              onClick={() => setActiveTab('cashbook')}
+              className={`hover:text-orange-600 transition whitespace-nowrap shrink-0 ${
+                activeTab === 'cashbook' ? 'text-orange-600 font-bold' : ''
+              }`}
+            >
+              Buku Kas
             </button>
             <button
               onClick={() => setActiveTab('rewards')}
@@ -951,7 +1209,7 @@ export default function App() {
 
       {/* Mobile Fixed Bottom Navigation Bar */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/80 px-1 py-1 shadow-lg w-full">
-        <div className="grid grid-cols-5 items-center w-full max-w-md mx-auto">
+        <div className="grid grid-cols-6 items-center w-full max-w-md mx-auto">
           <button
             onClick={() => setActiveTab('dashboard')}
             className={`flex flex-col items-center justify-center py-1 transition min-w-0 ${
@@ -970,6 +1228,16 @@ export default function App() {
           >
             <Users className="w-4 h-4 sm:w-5 sm:h-5" />
             <span className="text-[10px] mt-0.5 truncate max-w-full px-0.5 leading-tight">Pelanggan</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('cashbook')}
+            className={`flex flex-col items-center justify-center py-1 transition min-w-0 ${
+              activeTab === 'cashbook' ? 'text-teal-600 font-bold' : 'text-slate-500'
+            }`}
+          >
+            <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" />
+            <span className="text-[10px] mt-0.5 truncate max-w-full px-0.5 leading-tight">Buku Kas</span>
           </button>
 
           <button

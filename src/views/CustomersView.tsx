@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
-import { Users, Search, UserPlus, QrCode, Stamp, Gift, Phone, Calendar, ArrowRight, Eye, Edit2, CheckCircle2, XCircle, ExternalLink, Copy, Check } from 'lucide-react';
+import { Users, Search, UserPlus, QrCode, Stamp, Gift, Phone, Calendar, ArrowRight, Eye, Edit2, CheckCircle2, XCircle, ExternalLink, Copy, Check, Clock } from 'lucide-react';
 import { Customer, StampLedger, Transaction, StoreSettings } from '../types';
 import { getCustomerStampBalance, formatDate, formatRupiah } from '../utils/storage';
 import { StampCard } from '../components/StampCard';
-import { WhatsAppButton } from '../components/WhatsAppButton';
-import { createBalanceInquiryWAMessage, sendWhatsAppMessage } from '../utils/whatsapp';
+import { WhatsAppButton, WhatsAppIcon } from '../components/WhatsAppButton';
+import {
+  createBalanceInquiryWAMessage,
+  createConsolidatedDebtReminderWAMessage,
+  sendWhatsAppMessage,
+} from '../utils/whatsapp';
 
 interface Props {
   customers: Customer[];
@@ -34,15 +38,29 @@ export const CustomersView: React.FC<Props> = ({
   onViewPublicCard,
 }) => {
   const [search, setSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'reward_ready'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'reward_ready' | 'unpaid_debt'>('all');
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+
+  const isTrxUnpaid = (t: Transaction) =>
+    t.status === 'confirmed' &&
+    (t.paymentStatus === 'unpaid' || (t.paymentMethod === 'hutang' && t.paymentStatus !== 'paid'));
 
   const customerItems = customers.map(c => {
     const balance = getCustomerStampBalance(c.id, ledgers);
+    const unpaidTrxs = transactions.filter(
+      t =>
+        isTrxUnpaid(t) &&
+        (t.customerId === c.id ||
+          t.customerId === c.customerCode ||
+          t.customerName.toLowerCase().trim() === c.name.toLowerCase().trim())
+    );
+    const unpaidTotal = unpaidTrxs.reduce((sum, t) => sum + t.amount, 0);
     return {
       ...c,
       balance,
       isRewardReady: balance >= (settings.rewardRequiredStamps || 25),
+      unpaidTrxs,
+      unpaidTotal,
     };
   });
 
@@ -56,6 +74,7 @@ export const CustomersView: React.FC<Props> = ({
 
     if (filterStatus === 'active') return c.status === 'active';
     if (filterStatus === 'reward_ready') return c.isRewardReady && c.status === 'active';
+    if (filterStatus === 'unpaid_debt') return c.unpaidTrxs.length > 0;
     return true;
   });
 
@@ -105,10 +124,10 @@ export const CustomersView: React.FC<Props> = ({
         </div>
 
         {/* Segmented Filter Buttons */}
-        <div className="flex items-center gap-1 w-full sm:w-auto p-1 bg-slate-100 rounded-xl">
+        <div className="flex flex-wrap items-center gap-1 w-full sm:w-auto p-1 bg-slate-100 rounded-xl">
           <button
             onClick={() => setFilterStatus('all')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition whitespace-nowrap shrink-0 ${
               filterStatus === 'all'
                 ? 'bg-white text-slate-900 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -118,7 +137,7 @@ export const CustomersView: React.FC<Props> = ({
           </button>
           <button
             onClick={() => setFilterStatus('reward_ready')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition whitespace-nowrap shrink-0 ${
               filterStatus === 'reward_ready'
                 ? 'bg-white text-emerald-700 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -127,8 +146,18 @@ export const CustomersView: React.FC<Props> = ({
             Siap Hadiah ({customerItems.filter(c => c.isRewardReady).length})
           </button>
           <button
+            onClick={() => setFilterStatus('unpaid_debt')}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition whitespace-nowrap shrink-0 ${
+              filterStatus === 'unpaid_debt'
+                ? 'bg-white text-amber-800 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            Punya Hutang ({customerItems.filter(c => c.unpaidTrxs.length > 0).length})
+          </button>
+          <button
             onClick={() => setFilterStatus('active')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition whitespace-nowrap shrink-0 ${
               filterStatus === 'active'
                 ? 'bg-white text-slate-900 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -255,6 +284,36 @@ export const CustomersView: React.FC<Props> = ({
                       </span>
                     </div>
                   </div>
+
+                  {customer.unpaidTrxs.length > 0 && (
+                    <div className="mt-2.5 p-2.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-bold text-amber-900 flex items-center gap-1 truncate">
+                          <Clock className="w-3 h-3 text-amber-600 shrink-0" />
+                          <span>Hutang: {formatRupiah(customer.unpaidTotal)}</span>
+                        </p>
+                        <p className="text-[10px] text-amber-700">
+                          {customer.unpaidTrxs.length} nota belum lunas
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const msg = createConsolidatedDebtReminderWAMessage(
+                            customer,
+                            customer.unpaidTrxs,
+                            settings
+                          );
+                          sendWhatsAppMessage(customer.phone, msg);
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition shadow-xs whitespace-nowrap shrink-0"
+                        title="Kirim pengingat tagihan hutang via WhatsApp"
+                      >
+                        <WhatsAppIcon className="w-3 h-3 text-white" />
+                        <span>Tagih WA</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Card Actions */}
@@ -335,6 +394,34 @@ export const CustomersView: React.FC<Props> = ({
                   size="md"
                   className="py-2.5 px-3.5"
                 />
+
+                {(() => {
+                  const selUnpaid = transactions.filter(
+                    t =>
+                      isTrxUnpaid(t) &&
+                      (t.customerId === selectedCustomer.id ||
+                        t.customerId === selectedCustomer.customerCode ||
+                        t.customerName.toLowerCase().trim() === selectedCustomer.name.toLowerCase().trim())
+                  );
+                  if (selUnpaid.length === 0) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const msg = createConsolidatedDebtReminderWAMessage(
+                          selectedCustomer,
+                          selUnpaid,
+                          settings
+                        );
+                        sendWhatsAppMessage(selectedCustomer.phone, msg);
+                      }}
+                      className="py-2.5 px-3.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition active:scale-95"
+                    >
+                      <WhatsAppIcon className="w-4 h-4 text-white" />
+                      <span>Ingatkan Hutang ({selUnpaid.length})</span>
+                    </button>
+                  );
+                })()}
 
                 <button
                   onClick={() => {

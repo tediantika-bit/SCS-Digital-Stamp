@@ -21,7 +21,7 @@ import {
   Link,
   Send,
 } from 'lucide-react';
-import { StoreSettings, TransactionCategory, Reward, Customer, Transaction, Redemption, StampLedger } from '../types';
+import { StoreSettings, TransactionCategory, Reward, Customer, Transaction, Redemption, StampLedger, CashBookEntry } from '../types';
 import { formatRupiah, formatDate } from '../utils/storage';
 import {
   GOOGLE_APPS_SCRIPT_TEMPLATE,
@@ -38,6 +38,7 @@ interface Props {
   transactions?: Transaction[];
   redemptions?: Redemption[];
   ledgers?: StampLedger[];
+  cashBook?: CashBookEntry[];
   onSaveSettings: (settings: StoreSettings) => void;
   onSaveCategories?: (categories: TransactionCategory[]) => void;
   onResetData: () => void;
@@ -52,6 +53,7 @@ export const SettingsView: React.FC<Props> = ({
   transactions = [],
   redemptions = [],
   ledgers = [],
+  cashBook = [],
   onSaveSettings,
   onResetData,
   onPullData,
@@ -186,7 +188,8 @@ export const SettingsView: React.FC<Props> = ({
         transactions,
         redemptions,
         ledgers,
-        formData
+        formData,
+        cashBook
       );
       setSyncStatus(res);
       if (res.success) {

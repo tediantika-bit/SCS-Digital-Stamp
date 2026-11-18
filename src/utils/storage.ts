@@ -1,4 +1,4 @@
-import { Customer, Transaction, TransactionCategory, StampLedger, Reward, Redemption, StoreSettings } from '../types';
+import { Customer, Transaction, TransactionCategory, StampLedger, Reward, Redemption, StoreSettings, CashBookEntry } from '../types';
 
 // ============================================================================
 // URL GOOGLE APPS SCRIPT DEFAULT (OTOMATIS AKTIF DI SEMUA PERANGKAT / BROWSER)
@@ -51,6 +51,7 @@ export const DEFAULT_TRANSACTIONS: Transaction[] = [];
 export const DEFAULT_LEDGERS: StampLedger[] = [];
 
 export const DEFAULT_REDEMPTIONS: Redemption[] = [];
+export const DEFAULT_CASH_BOOK: CashBookEntry[] = [];
 
 // Storage Keys
 const STORAGE_PREFIX = 'scs_stamp_v2_';
@@ -62,6 +63,7 @@ const KEYS = {
   LEDGERS: `${STORAGE_PREFIX}ledgers`,
   REWARDS: `${STORAGE_PREFIX}rewards`,
   REDEMPTIONS: `${STORAGE_PREFIX}redemptions`,
+  CASH_BOOK: `${STORAGE_PREFIX}cash_book`,
 };
 
 export interface AppData {
@@ -72,6 +74,7 @@ export interface AppData {
   ledgers: StampLedger[];
   rewards: Reward[];
   redemptions: Redemption[];
+  cashBook: CashBookEntry[];
 }
 
 export function loadAppData(): AppData {
@@ -84,6 +87,7 @@ export function loadAppData(): AppData {
       ledgers: DEFAULT_LEDGERS,
       rewards: DEFAULT_REWARDS,
       redemptions: DEFAULT_REDEMPTIONS,
+      cashBook: DEFAULT_CASH_BOOK,
     };
   }
 
@@ -95,6 +99,7 @@ export function loadAppData(): AppData {
     const rawLedgers = localStorage.getItem(KEYS.LEDGERS);
     const rawRewards = localStorage.getItem(KEYS.REWARDS);
     const rawRedemptions = localStorage.getItem(KEYS.REDEMPTIONS);
+    const rawCashBook = localStorage.getItem(KEYS.CASH_BOOK);
 
     let settings: StoreSettings = rawSettings ? JSON.parse(rawSettings) : DEFAULT_SETTINGS;
 
@@ -183,6 +188,8 @@ export function loadAppData(): AppData {
       parsedCategories.push({ id: 'cat-10', name: 'Lainnya', status: 'active' });
     }
 
+    const parsedCashBook: CashBookEntry[] = rawCashBook ? JSON.parse(rawCashBook) : DEFAULT_CASH_BOOK;
+
     return {
       settings,
       categories: parsedCategories,
@@ -191,6 +198,7 @@ export function loadAppData(): AppData {
       ledgers: normalizedLedgers,
       rewards: rawRewards ? JSON.parse(rawRewards) : DEFAULT_REWARDS,
       redemptions: normalizedRedemptions,
+      cashBook: parsedCashBook,
     };
   } catch (err) {
     console.error('Failed to parse stored app data:', err);
@@ -202,6 +210,7 @@ export function loadAppData(): AppData {
       ledgers: DEFAULT_LEDGERS,
       rewards: DEFAULT_REWARDS,
       redemptions: DEFAULT_REDEMPTIONS,
+      cashBook: DEFAULT_CASH_BOOK,
     };
   }
 }
@@ -216,6 +225,7 @@ export function saveAppData(data: Partial<AppData>) {
     if (data.ledgers) localStorage.setItem(KEYS.LEDGERS, JSON.stringify(data.ledgers));
     if (data.rewards) localStorage.setItem(KEYS.REWARDS, JSON.stringify(data.rewards));
     if (data.redemptions) localStorage.setItem(KEYS.REDEMPTIONS, JSON.stringify(data.redemptions));
+    if (data.cashBook) localStorage.setItem(KEYS.CASH_BOOK, JSON.stringify(data.cashBook));
   } catch (err) {
     console.error('Failed to persist app data:', err);
   }
@@ -230,6 +240,7 @@ export function resetAllData(): AppData {
     ledgers: DEFAULT_LEDGERS,
     rewards: DEFAULT_REWARDS,
     redemptions: DEFAULT_REDEMPTIONS,
+    cashBook: DEFAULT_CASH_BOOK,
   };
   saveAppData(initialData);
   return initialData;

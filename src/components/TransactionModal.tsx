@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { X, Calculator, Plus, AlertCircle, ArrowRight, Stamp, CheckCircle2, Phone } from 'lucide-react';
-import { Customer, TransactionCategory, StoreSettings, Transaction } from '../types';
+import { X, Calculator, Plus, AlertCircle, ArrowRight, Stamp, CheckCircle2, Phone, Banknote, QrCode, Clock } from 'lucide-react';
+import { Customer, TransactionCategory, StoreSettings, Transaction, PaymentMethod } from '../types';
 import { calculateStampsFromAmount, formatRupiah } from '../utils/storage';
 import { sound } from '../utils/audio';
 import { WhatsAppIcon } from './WhatsAppButton';
@@ -20,6 +20,7 @@ interface Props {
     categoryName: string;
     amount: number;
     stampEarned: number;
+    paymentMethod: PaymentMethod;
     description: string;
   }) => Transaction | void;
 }
@@ -37,6 +38,7 @@ export const TransactionModal: React.FC<Props> = ({
     categories[0]?.id || 'cat-1'
   );
   const [rawAmount, setRawAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [description, setDescription] = useState('');
   const [sendWA, setSendWA] = useState(!!customer.phone);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +49,8 @@ export const TransactionModal: React.FC<Props> = ({
   const isLainnya = selectedCategory?.name?.toLowerCase().trim() === 'lainnya' || selectedCategory?.id === 'cat-10';
   const numericAmount = parseInt(rawAmount.replace(/\D/g, ''), 10) || 0;
   const stampsEarned = calculateStampsFromAmount(numericAmount, settings.stampThreshold, selectedCategory?.name || selectedCategoryId);
-  const balanceAfter = currentBalance + stampsEarned;
+  const isHutang = paymentMethod === 'hutang';
+  const balanceAfter = isHutang ? currentBalance : currentBalance + stampsEarned;
 
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value.replace(/\D/g, '');
@@ -83,6 +86,7 @@ export const TransactionModal: React.FC<Props> = ({
       categoryName: catName,
       amount: numericAmount,
       stampEarned: stampsEarned,
+      paymentMethod,
       description: descText,
     });
 
@@ -95,7 +99,10 @@ export const TransactionModal: React.FC<Props> = ({
         categoryId: catId,
         categoryName: catName,
         amount: numericAmount,
-        stampEarned: stampsEarned,
+        stampEarned: isHutang ? 0 : stampsEarned,
+        pendingStamps: isHutang ? stampsEarned : 0,
+        paymentMethod,
+        paymentStatus: isHutang ? 'unpaid' : 'paid',
         status: 'confirmed',
         description: descText,
         createdBy: 'Admin SCS',
@@ -220,8 +227,10 @@ export const TransactionModal: React.FC<Props> = ({
                 <p className="text-base font-extrabold text-slate-700 tabular-nums">{currentBalance}</p>
               </div>
 
-              <div className="bg-orange-600 text-white p-2 rounded-xl shadow-xs">
-                <p className="text-[10px] text-orange-200 uppercase font-semibold">Stempel Didapat</p>
+              <div className={`${isHutang ? 'bg-amber-600' : 'bg-orange-600'} text-white p-2 rounded-xl shadow-xs`}>
+                <p className="text-[10px] text-orange-100 uppercase font-semibold">
+                  {isHutang ? 'Stempel Tertahan' : 'Stempel Didapat'}
+                </p>
                 <p className="text-base font-black tabular-nums">+{stampsEarned}</p>
               </div>
 
@@ -233,18 +242,86 @@ export const TransactionModal: React.FC<Props> = ({
               </div>
             </div>
 
+            {isHutang && stampsEarned > 0 && (
+              <p className="text-[11px] text-amber-800 mt-2 text-center font-semibold">
+                Mode Hutang: +{stampsEarned} stempel ditahan sementara &amp; otomatis masuk saat hutang dilunasi.
+              </p>
+            )}
+
             {numericAmount > 0 && stampsEarned === 0 && (
               <p className="text-[11px] text-amber-700 mt-2 text-center font-medium">
                 Transaksi di bawah {formatRupiah(settings.stampThreshold)} tidak mendapatkan stempel.
               </p>
             )}
 
-            {balanceAfter >= settings.rewardRequiredStamps && (
+            {!isHutang && balanceAfter >= settings.rewardRequiredStamps && (
               <div className="mt-2.5 p-2 rounded-xl bg-emerald-100/80 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center justify-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>Pelanggan ini akan berhak menukarkan Hadiah ({settings.defaultRewardName})!</span>
               </div>
             )}
+          </div>
+
+          {/* Metode Pembayaran */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Metode Pembayaran
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setPaymentMethod('cash')}
+                className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${
+                  paymentMethod === 'cash'
+                    ? 'bg-emerald-50 border-emerald-500 text-emerald-900 ring-1 ring-emerald-400/50'
+                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <div className={`p-1.5 rounded-lg shrink-0 ${paymentMethod === 'cash' ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                  <Banknote className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold leading-tight">Cash (Tunai)</p>
+                  <p className="text-[10px] text-slate-500 truncate">Masuk Buku Kas</p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPaymentMethod('qris')}
+                className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${
+                  paymentMethod === 'qris'
+                    ? 'bg-blue-50 border-blue-500 text-blue-900 ring-1 ring-blue-400/50'
+                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <div className={`p-1.5 rounded-lg shrink-0 ${paymentMethod === 'qris' ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                  <QrCode className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold leading-tight">QRIS</p>
+                  <p className="text-[10px] text-slate-500 truncate">Non-tunai (lunas)</p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPaymentMethod('hutang')}
+                className={`p-2.5 rounded-xl border text-left transition flex items-center gap-2.5 ${
+                  paymentMethod === 'hutang'
+                    ? 'bg-amber-50 border-amber-500 text-amber-950 ring-1 ring-amber-400/50'
+                    : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <div className={`p-1.5 rounded-lg shrink-0 ${paymentMethod === 'hutang' ? 'bg-amber-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                  <Clock className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold leading-tight">Hutang</p>
+                  <p className="text-[10px] text-slate-500 truncate">Stempel ditahan</p>
+                </div>
+              </button>
+            </div>
           </div>
 
           {/* Description (Optional) */}
@@ -300,10 +377,14 @@ export const TransactionModal: React.FC<Props> = ({
             </button>
             <button
               type="submit"
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold shadow-md shadow-orange-600/20 active:scale-95 transition"
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-white text-xs font-bold shadow-md active:scale-95 transition ${
+                isHutang
+                  ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
+                  : 'bg-orange-600 hover:bg-orange-700 shadow-orange-600/20'
+              }`}
             >
-              <Stamp className="w-4 h-4" />
-              <span>Konfirmasi & Beri Stempel</span>
+              {isHutang ? <Clock className="w-4 h-4" /> : <Stamp className="w-4 h-4" />}
+              <span>{isHutang ? 'Catat Hutang (Stempel Ditahan)' : 'Konfirmasi & Beri Stempel'}</span>
             </button>
           </div>
         </form>

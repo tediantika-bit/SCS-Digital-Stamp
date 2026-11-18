@@ -28,15 +28,19 @@ export const ReportsView: React.FC<Props> = ({
   const todayStr = now.toISOString().slice(0, 10);
   const currentMonthStr = now.toISOString().slice(0, 7);
 
+  const isUnpaidDebt = (t: Transaction) =>
+    t.paymentStatus === 'unpaid' || (t.paymentMethod === 'hutang' && t.paymentStatus !== 'paid');
+
   const filteredTransactions = transactions.filter(t => {
-    if (period === 'today') return t.createdAt.startsWith(todayStr);
-    if (period === 'month') return t.createdAt.startsWith(currentMonthStr);
-    if (customStart && t.createdAt < customStart) return false;
-    if (customEnd && t.createdAt > `${customEnd}T23:59:59.999Z`) return false;
+    const effectiveDate = t.settledAt || t.createdAt;
+    if (period === 'today') return effectiveDate.startsWith(todayStr);
+    if (period === 'month') return effectiveDate.startsWith(currentMonthStr);
+    if (customStart && effectiveDate < customStart) return false;
+    if (customEnd && effectiveDate > `${customEnd}T23:59:59.999Z`) return false;
     return true;
   });
 
-  const confirmedTrx = filteredTransactions.filter(t => t.status === 'confirmed');
+  const confirmedTrx = filteredTransactions.filter(t => t.status === 'confirmed' && !isUnpaidDebt(t));
   const totalAmount = confirmedTrx.reduce((s, t) => s + t.amount, 0);
   const totalStamps = confirmedTrx.reduce((s, t) => s + t.stampEarned, 0);
 

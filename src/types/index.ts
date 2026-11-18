@@ -24,6 +24,8 @@ export interface TransactionCategory {
 }
 
 export type TransactionStatus = 'confirmed' | 'cancelled';
+export type PaymentMethod = 'cash' | 'qris' | 'hutang';
+export type PaymentStatus = 'paid' | 'unpaid';
 
 export interface Transaction {
   id: string;
@@ -34,8 +36,28 @@ export interface Transaction {
   categoryName: string;
   amount: number; // in IDR
   stampEarned: number;
+  paymentMethod?: PaymentMethod; // 'cash' enters Buku Kas Tunai, 'qris' non-cash, 'hutang' pay later
+  paymentStatus?: PaymentStatus; // 'unpaid' while debt is unsettled, 'paid' when settled
+  pendingStamps?: number; // stamps held until hutang is settled (Opsi A)
+  settledAt?: string; // ISO timestamp when hutang was settled
+  settledMethod?: 'cash' | 'qris'; // payment method used when settling hutang
   status: TransactionStatus;
   description?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export type CashBookEntryType = 'in' | 'out';
+
+export interface CashBookEntry {
+  id: string;
+  entryCode: string; // e.g. BKU-20261118-001
+  date: string; // ISO string
+  type: CashBookEntryType; // 'in' = Kas Masuk Tunai, 'out' = Kas Keluar Tunai
+  category: string;
+  description: string;
+  amount: number; // positive IDR
+  sourceTransactionId?: string; // links to Transaction.id when auto-recorded from Cash customer trx
   createdBy: string;
   createdAt: string;
 }

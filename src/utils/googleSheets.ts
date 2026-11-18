@@ -1,4 +1,4 @@
-import { Customer, Transaction, Redemption, StoreSettings, StampLedger } from '../types';
+import { Customer, Transaction, Redemption, StoreSettings, StampLedger, CashBookEntry } from '../types';
 import { getCustomerStampBalance, formatRupiah, formatDate, sanitizePhone } from './storage';
 
 /**
@@ -51,7 +51,8 @@ function setupSheets() {
   }
   var headersTransaksi = [
     "Kode Transaksi", "Waktu", "ID Pelanggan", "Nama Pelanggan", 
-    "Nominal Belanja (Rp)", "Stempel Didapat", "Catatan Transaksi", "Status"
+    "Nominal Belanja (Rp)", "Stempel Didapat", "Catatan Transaksi", "Status", "Metode Bayar",
+    "Status Bayar", "Stempel Tertahan", "Waktu Lunas", "Metode Lunas"
   ];
   sheetTransaksi.getRange(1, 1, 1, headersTransaksi.length).setValues([headersTransaksi]);
   sheetTransaksi.getRange(1, 1, 1, headersTransaksi.length)
@@ -72,13 +73,26 @@ function setupSheets() {
     .setBackground("#059669").setFontColor("#ffffff").setFontWeight("bold");
   sheetHadiah.setFrozenRows(1);
 
+  // 4. Sheet Buku Kas Umum
+  var sheetBukuKas = ss.getSheetByName("Buku_Kas");
+  if (!sheetBukuKas) {
+    sheetBukuKas = ss.insertSheet("Buku_Kas");
+  }
+  var headersBukuKas = [
+    "Kode Kas", "Waktu", "Jenis", "Kategori", "Keterangan", "Nominal (Rp)", "ID Transaksi", "Dicatat Oleh"
+  ];
+  sheetBukuKas.getRange(1, 1, 1, headersBukuKas.length).setValues([headersBukuKas]);
+  sheetBukuKas.getRange(1, 1, 1, headersBukuKas.length)
+    .setBackground("#0f766e").setFontColor("#ffffff").setFontWeight("bold");
+  sheetBukuKas.setFrozenRows(1);
+
   // Hapus Sheet1 default jika ada dan kosong
   var defaultSheet = ss.getSheetByName("Sheet1");
   if (defaultSheet && ss.getSheets().length > 1) {
     try { ss.deleteSheet(defaultSheet); } catch(e) {}
   }
 
-  Logger.log("Setup 3 Sheet SCS Digital Stamp Berhasil!");
+  Logger.log("Setup 4 Sheet SCS Digital Stamp Berhasil!");
 }
 
 function doGet(e) {
@@ -123,12 +137,45 @@ function doPost(e) {
         t.amount,
         t.stampEarned,
         t.description || "Transaksi Toko",
-        t.status || "confirmed"
+        t.status || "confirmed",
+        t.paymentMethod || "cash",
+        t.paymentStatus || "paid",
+        Number(t.pendingStamps) || 0,
+        t.settledAt || "",
+        t.settledMethod || ""
       ]);
       
       // Update stempel di sheet Pelanggan
       updateCustomerBalance(ss, t.customerId, data.newBalance);
       
+      return ContentService.createTextOutput(JSON.stringify({ success: true, action: action }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 1b. Lunasi Hutang Transaksi
+    if (action === "settle_transaction") {
+      var sheetSettle = ss.getSheetByName("Transaksi");
+      var st = data.transaction || {};
+      var targetTrxCode = String(st.transactionCode || data.transactionCode || "").trim();
+      if (sheetSettle && sheetSettle.getLastRow() > 1 && targetTrxCode) {
+        var trxCodes = sheetSettle.getRange(2, 1, sheetSettle.getLastRow() - 1, 1).getValues();
+        for (var sIdx = 0; sIdx < trxCodes.length; sIdx++) {
+          if (String(trxCodes[sIdx][0] || "").trim() === targetTrxCode) {
+            var rowNum = sIdx + 2;
+            sheetSettle.getRange(rowNum, 6).setValue(Number(st.stampEarned) || 0);
+            sheetSettle.getRange(rowNum, 10).setValue("paid");
+            sheetSettle.getRange(rowNum, 11).setValue(Number(st.pendingStamps) || 0);
+            sheetSettle.getRange(rowNum, 12).setValue(st.settledAt || new Date().toISOString());
+            sheetSettle.getRange(rowNum, 13).setValue(st.settledMethod || "cash");
+            break;
+          }
+        }
+      }
+
+      if (st.customerId !== undefined && data.newBalance !== undefined) {
+        updateCustomerBalance(ss, st.customerId, data.newBalance);
+      }
+
       return ContentService.createTextOutput(JSON.stringify({ success: true, action: action }))
         .setMimeType(ContentService.MimeType.JSON);
     }
@@ -193,11 +240,13 @@ function doPost(e) {
       var sheetP = ss.getSheetByName("Pelanggan");
       var sheetT = ss.getSheetByName("Transaksi");
       var sheetH = ss.getSheetByName("Penukaran_Hadiah");
+      var sheetBK = ss.getSheetByName("Buku_Kas");
       
       // Bersihkan data lama (tetap simpan header baris 1)
       if (sheetP.getLastRow() > 1) sheetP.deleteRows(2, sheetP.getLastRow() - 1);
       if (sheetT.getLastRow() > 1) sheetT.deleteRows(2, sheetT.getLastRow() - 1);
       if (sheetH.getLastRow() > 1) sheetH.deleteRows(2, sheetH.getLastRow() - 1);
+      if (sheetBK && sheetBK.getLastRow() > 1) sheetBK.deleteRows(2, sheetBK.getLastRow() - 1);
 
       // Isi Pelanggan
       if (data.customers && data.customers.length > 0) {
@@ -231,7 +280,12 @@ function doPost(e) {
             t.amount,
             t.stampEarned,
             t.description || "Transaksi Toko",
-            t.status
+            t.status,
+            t.paymentMethod || "cash",
+            t.paymentStatus || "paid",
+            Number(t.pendingStamps) || 0,
+            t.settledAt || "",
+            t.settledMethod || ""
           ];
         });
         sheetT.getRange(2, 1, rowsT.length, rowsT[0].length).setValues(rowsT);
@@ -252,6 +306,23 @@ function doPost(e) {
           ];
         });
         sheetH.getRange(2, 1, rowsH.length, rowsH[0].length).setValues(rowsH);
+      }
+
+      // Isi Buku Kas Umum
+      if (sheetBK && data.cashBook && data.cashBook.length > 0) {
+        var rowsBK = data.cashBook.map(function(b) {
+          return [
+            b.entryCode,
+            b.date || b.createdAt,
+            b.type === "out" ? "Keluar" : "Masuk",
+            b.category || "Lainnya",
+            b.description || "",
+            Number(b.amount) || 0,
+            b.sourceTransactionId || "",
+            b.createdBy || "Admin SCS"
+          ];
+        });
+        sheetBK.getRange(2, 1, rowsBK.length, rowsBK[0].length).setValues(rowsBK);
       }
 
       // Simpan Pengaturan Toko jika disertakan
@@ -277,6 +348,49 @@ function doPost(e) {
         success: true,
         action: action
       })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 6. Tambah Entri Buku Kas Umum
+    if (action === "add_cash_entry") {
+      var sheetKas = ss.getSheetByName("Buku_Kas");
+      if (!sheetKas) {
+        sheetKas = ss.insertSheet("Buku_Kas");
+        var hKas = ["Kode Kas", "Waktu", "Jenis", "Kategori", "Keterangan", "Nominal (Rp)", "ID Transaksi", "Dicatat Oleh"];
+        sheetKas.getRange(1, 1, 1, hKas.length).setValues([hKas]);
+        sheetKas.getRange(1, 1, 1, hKas.length).setBackground("#0f766e").setFontColor("#ffffff").setFontWeight("bold");
+        sheetKas.setFrozenRows(1);
+      }
+      var b = data.entry;
+      if (b) {
+        sheetKas.appendRow([
+          b.entryCode,
+          b.date || b.createdAt,
+          b.type === "out" ? "Keluar" : "Masuk",
+          b.category || "Lainnya",
+          b.description || "",
+          Number(b.amount) || 0,
+          b.sourceTransactionId || "",
+          b.createdBy || "Admin SCS"
+        ]);
+      }
+      return ContentService.createTextOutput(JSON.stringify({ success: true, action: action }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 7. Hapus Entri Buku Kas Umum
+    if (action === "delete_cash_entry") {
+      var sheetKasDel = ss.getSheetByName("Buku_Kas");
+      if (sheetKasDel && sheetKasDel.getLastRow() > 1) {
+        var targetCode = String(data.entryCode || "").trim();
+        var kasIds = sheetKasDel.getRange(2, 1, sheetKasDel.getLastRow() - 1, 1).getValues();
+        for (var idx = kasIds.length - 1; idx >= 0; idx--) {
+          if (String(kasIds[idx][0]).trim() === targetCode) {
+            sheetKasDel.deleteRow(idx + 2);
+          }
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({ success: true, action: action }))
+        .setMimeType(ContentService.MimeType.JSON);
     }
 
     return ContentService.createTextOutput(JSON.stringify({ success: true }))
@@ -336,6 +450,7 @@ function getAllDataFromSheets(ss) {
     customers: [],
     transactions: [],
     redemptions: [],
+    cashBook: [],
     settings: null,
     timestamp: new Date().toISOString()
   };
@@ -378,11 +493,22 @@ function getAllDataFromSheets(ss) {
   // 2. Baca Sheet Transaksi
   var sheetT = ss.getSheetByName("Transaksi");
   if (sheetT && sheetT.getLastRow() > 1) {
-    var rowsT = sheetT.getRange(2, 1, sheetT.getLastRow() - 1, 8).getValues();
+    var colCountT = Math.min(13, Math.max(8, sheetT.getLastColumn()));
+    var rowsT = sheetT.getRange(2, 1, sheetT.getLastRow() - 1, colCountT).getValues();
     for (var j = 0; j < rowsT.length; j++) {
       var rt = rowsT[j];
       if (rt[0] || rt[2]) {
         var tCode = String(rt[0] || "").trim();
+        var pm = rt[8] ? String(rt[8]).trim().toLowerCase() : "";
+        var rawPs = rt[9] ? String(rt[9]).trim().toLowerCase() : "";
+        var stampVal = Number(rt[5]) || 0;
+        var resolvedPm = (pm === "qris" || pm === "cash" || pm === "hutang") ? pm : undefined;
+        var resolvedPs = (rawPs === "unpaid" || rawPs === "paid")
+          ? rawPs
+          : (resolvedPm === "hutang" && stampVal === 0 ? "unpaid" : "paid");
+        var rawSm = rt[12] ? String(rt[12]).trim().toLowerCase() : "";
+        var resolvedSm = (rawSm === "cash" || rawSm === "qris") ? rawSm : undefined;
+
         result.transactions.push({
           id: "trx-" + tCode,
           transactionCode: tCode,
@@ -390,9 +516,14 @@ function getAllDataFromSheets(ss) {
           customerId: String(rt[2] || "").trim(),
           customerName: String(rt[3] || "").trim(),
           amount: Number(rt[4]) || 0,
-          stampEarned: Number(rt[5]) || 0,
+          stampEarned: stampVal,
           description: String(rt[6] || "Transaksi Toko").trim(),
           status: String(rt[7] || "confirmed").trim(),
+          paymentMethod: resolvedPm,
+          paymentStatus: resolvedPs,
+          pendingStamps: Number(rt[10]) || 0,
+          settledAt: rt[11] ? new Date(rt[11]).toISOString() : undefined,
+          settledMethod: resolvedSm,
           categoryId: "cat-general",
           categoryName: "Transaksi Toko"
         });
@@ -420,6 +551,32 @@ function getAllDataFromSheets(ss) {
           remainingBalance: Number(rh[6]) || 0,
           notes: String(rh[7] || "Diterima langsung").trim(),
           status: "completed"
+        });
+      }
+    }
+  }
+
+  // 4. Baca Sheet Buku Kas Umum
+  var sheetBK = ss.getSheetByName("Buku_Kas");
+  if (sheetBK && sheetBK.getLastRow() > 1) {
+    var rowsBK = sheetBK.getRange(2, 1, sheetBK.getLastRow() - 1, 8).getValues();
+    for (var b = 0; b < rowsBK.length; b++) {
+      var rbk = rowsBK[b];
+      if (rbk[0] || rbk[4]) {
+        var bCode = String(rbk[0] || "").trim();
+        var rawType = String(rbk[2] || "").trim().toLowerCase();
+        var isoDate = rbk[1] ? new Date(rbk[1]).toISOString() : new Date().toISOString();
+        result.cashBook.push({
+          id: "bku-" + bCode,
+          entryCode: bCode,
+          date: isoDate,
+          type: (rawType === "keluar" || rawType === "out") ? "out" : "in",
+          category: String(rbk[3] || "Lainnya").trim(),
+          description: String(rbk[4] || "").trim(),
+          amount: Number(rbk[5]) || 0,
+          sourceTransactionId: rbk[6] ? String(rbk[6]).trim() : undefined,
+          createdBy: String(rbk[7] || "Admin SCS").trim(),
+          createdAt: isoDate
         });
       }
     }
@@ -505,7 +662,8 @@ export async function syncAllToGoogleSheets(
   transactions: Transaction[],
   redemptions: Redemption[],
   ledgers: StampLedger[],
-  settings: StoreSettings
+  settings: StoreSettings,
+  cashBook: CashBookEntry[] = []
 ): Promise<{ success: boolean; message: string }> {
   if (!scriptUrl || !scriptUrl.startsWith('https://script.google.com/')) {
     return {
@@ -537,6 +695,7 @@ export async function syncAllToGoogleSheets(
       ...r,
       remainingBalance: getCustomerStampBalance(r.customerId, ledgers),
     })),
+    cashBook,
     settings: {
       storeName: settings.storeName,
       storeTagline: settings.storeTagline,
@@ -584,6 +743,23 @@ export function sendTransactionToGoogleSheets(
 
   postToGoogleSheets(scriptUrl, {
     action: 'add_transaction',
+    transaction,
+    newBalance,
+  });
+}
+
+/**
+ * Sends a debt settlement update to Google Sheets in the background
+ */
+export function sendTransactionSettlementToGoogleSheets(
+  scriptUrl: string | undefined,
+  transaction: Transaction,
+  newBalance: number
+): void {
+  if (!scriptUrl) return;
+
+  postToGoogleSheets(scriptUrl, {
+    action: 'settle_transaction',
     transaction,
     newBalance,
   });
@@ -655,11 +831,42 @@ export function sendSettingsToGoogleSheets(
   });
 }
 
+/**
+ * Sends a single Cash Book entry to Google Sheets in the background
+ */
+export function sendCashEntryToGoogleSheets(
+  scriptUrl: string | undefined,
+  entry: CashBookEntry
+): void {
+  if (!scriptUrl) return;
+
+  postToGoogleSheets(scriptUrl, {
+    action: 'add_cash_entry',
+    entry,
+  });
+}
+
+/**
+ * Deletes a Cash Book entry from Google Sheets in the background
+ */
+export function deleteCashEntryFromGoogleSheets(
+  scriptUrl: string | undefined,
+  entryCode: string
+): void {
+  if (!scriptUrl || !entryCode) return;
+
+  postToGoogleSheets(scriptUrl, {
+    action: 'delete_cash_entry',
+    entryCode,
+  });
+}
+
 export interface PulledSheetsData {
   customers: Customer[];
   transactions: Transaction[];
   ledgers: StampLedger[];
   redemptions: Redemption[];
+  cashBook: CashBookEntry[];
   settings?: Partial<StoreSettings>;
 }
 
@@ -744,6 +951,17 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
 
     const transactions: Transaction[] = (json.transactions || []).map((t: any) => {
       const resolvedCustId = resolveCustomerId(t.customerId, t.customerName);
+      const pm =
+        t.paymentMethod === 'qris' || t.paymentMethod === 'cash' || t.paymentMethod === 'hutang'
+          ? t.paymentMethod
+          : undefined;
+      const stampVal = Number(t.stampEarned) || 0;
+      const paymentStatus =
+        t.paymentStatus === 'unpaid' || t.paymentStatus === 'paid'
+          ? t.paymentStatus
+          : pm === 'hutang' && stampVal === 0
+          ? 'unpaid'
+          : 'paid';
       return {
         id: t.id || `trx-${t.transactionCode}`,
         transactionCode: t.transactionCode,
@@ -752,7 +970,13 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
         categoryId: t.categoryId || 'cat-general',
         categoryName: t.categoryName || 'Transaksi Toko',
         amount: Number(t.amount) || 0,
-        stampEarned: Number(t.stampEarned) || 0,
+        stampEarned: stampVal,
+        paymentMethod: pm,
+        paymentStatus,
+        pendingStamps: Number(t.pendingStamps) || 0,
+        settledAt: t.settledAt || undefined,
+        settledMethod:
+          t.settledMethod === 'cash' || t.settledMethod === 'qris' ? t.settledMethod : undefined,
         status: t.status || 'confirmed',
         description: t.description || 'Transaksi Toko',
         createdBy: 'Kasir SCS',
@@ -779,7 +1003,7 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
     // Reconstruct ledger entries with running balance
     const ledgers: StampLedger[] = [];
     transactions
-      .filter(t => t.status !== 'cancelled')
+      .filter(t => t.status !== 'cancelled' && t.stampEarned > 0)
       .forEach(t => {
         ledgers.push({
           id: `ldg-${t.transactionCode}`,
@@ -790,7 +1014,7 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
           balanceAfter: 0,
           description: `Stempel transaksi ${t.transactionCode}`,
           createdBy: 'Kasir SCS',
-          createdAt: t.createdAt,
+          createdAt: t.settledAt || t.createdAt,
         });
       });
 
@@ -856,6 +1080,19 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
       if (json.settings.adminPin) pulledSettings.adminPin = String(json.settings.adminPin);
     }
 
+    const cashBook: CashBookEntry[] = (json.cashBook || []).map((b: any) => ({
+      id: b.id || `bku-${b.entryCode}`,
+      entryCode: String(b.entryCode || ''),
+      date: b.date || b.createdAt || new Date().toISOString(),
+      type: b.type === 'out' ? 'out' : 'in',
+      category: String(b.category || 'Lainnya'),
+      description: String(b.description || ''),
+      amount: Number(b.amount) || 0,
+      sourceTransactionId: b.sourceTransactionId || undefined,
+      createdBy: String(b.createdBy || 'Admin SCS'),
+      createdAt: b.createdAt || b.date || new Date().toISOString(),
+    }));
+
     return {
       success: true,
       data: {
@@ -863,6 +1100,7 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
         transactions,
         ledgers,
         redemptions,
+        cashBook,
         settings: pulledSettings,
       },
       message: `Berhasil menarik ${customers.length} pelanggan dan ${transactions.length} transaksi dari Spreadsheet!`,

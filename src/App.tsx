@@ -324,6 +324,34 @@ export default function App() {
               });
             });
 
+          mergedDebts
+            .filter(d => {
+              if (d.status !== 'paid' || !(d.pendingStamps > 0)) return false;
+              if (
+                d.settledTransactionId &&
+                mergedTransactions.some(
+                  t =>
+                    t.status !== 'cancelled' &&
+                    (t.id === d.settledTransactionId || t.transactionCode === d.settledTransactionId)
+                )
+              ) {
+                return false;
+              }
+              return true;
+            })
+            .forEach(d => {
+              rebuiltLedgers.push({
+                id: `ldg-htg-${d.debtCode}`,
+                customerId: d.customerId,
+                type: 'earn',
+                amount: d.pendingStamps,
+                balanceAfter: 0,
+                description: `Pelunasan hutang ${d.debtCode}`,
+                createdBy: d.createdBy || 'Admin SCS',
+                createdAt: d.settledAt || d.createdAt,
+              });
+            });
+
           mergedRedemptions
             .filter(r => r.status === 'completed')
             .forEach(r => {
@@ -501,38 +529,14 @@ export default function App() {
           }
         : null;
 
-    // Automatically record into Buku Kas Umum if paymentMethod === 'cash'
-    let newCashEntry: CashBookEntry | null = null;
-    if (payMethod === 'cash' && trxInput.amount > 0) {
-      const bkuPrefix = `BKU-${dateCode}-`;
-      const maxBkuSeq = data.cashBook
-        .filter(e => e.entryCode.startsWith(bkuPrefix))
-        .reduce((max, e) => Math.max(max, parseInt(e.entryCode.replace(bkuPrefix, ''), 10) || 0), 0);
-      const bkuSeq = String(maxBkuSeq + 1).padStart(3, '0');
-      newCashEntry = {
-        id: generateId('bku'),
-        entryCode: `${bkuPrefix}${bkuSeq}`,
-        date: nowIso,
-        type: 'in',
-        category: 'Transaksi Pelanggan',
-        description: `${trxInput.customerName} · ${trxInput.description || trxInput.categoryName}`,
-        amount: trxInput.amount,
-        sourceTransactionId: newTransaction.id,
-        createdBy: 'Admin SCS',
-        createdAt: nowIso,
-      };
-    }
-
     const nextTransactions = [newTransaction, ...data.transactions];
     const nextLedgers = newLedger ? [newLedger, ...data.ledgers] : data.ledgers;
-    const nextCashBook = newCashEntry ? [newCashEntry, ...data.cashBook] : data.cashBook;
 
     setData(prev => {
       const next = {
         ...prev,
         transactions: nextTransactions,
         ledgers: nextLedgers,
-        cashBook: nextCashBook,
       };
       saveAppData(next);
       return next;
@@ -541,9 +545,6 @@ export default function App() {
     // Background sync to Google Spreadsheet if configured
     if (data.settings.googleSheetsScriptUrl) {
       sendTransactionToGoogleSheets(data.settings.googleSheetsScriptUrl, newTransaction, newBal);
-      if (newCashEntry) {
-        sendCashEntryToGoogleSheets(data.settings.googleSheetsScriptUrl, newCashEntry);
-      }
     }
 
     return newTransaction;
@@ -599,47 +600,20 @@ export default function App() {
   const handleSettleDebt = (
     debtId: string,
     settledMethod: 'cash' | 'qris'
-  ): { debt: CustomerDebt; transaction: Transaction; newBalance: number } | undefined => {
+  ): { debt: CustomerDebt; newBalance: number } | undefined => {
     const target = data.debts.find(d => d.id === debtId && d.status === 'unpaid');
     if (!target) return undefined;
 
     const nowIso = new Date().toISOString();
-    const dateCode = nowIso.slice(0, 10).replace(/-/g, '');
     const stampsToAward = target.pendingStamps || 0;
     const curBal = getCustomerStampBalance(target.customerId, data.ledgers);
     const newBal = curBal + stampsToAward;
-
-    const trxPrefix = `TRX-${dateCode}-`;
-    const maxTrxSeq = data.transactions
-      .filter(t => t.transactionCode.startsWith(trxPrefix))
-      .reduce((max, t) => Math.max(max, parseInt(t.transactionCode.replace(trxPrefix, ''), 10) || 0), 0);
-    const trxSeq = String(Math.max(data.transactions.length, maxTrxSeq) + 1).padStart(3, '0');
-
-    const settledTrx: Transaction = {
-      id: generateId('trx'),
-      transactionCode: `${trxPrefix}${trxSeq}`,
-      customerId: target.customerId,
-      customerName: target.customerName,
-      categoryId: target.categoryId,
-      categoryName: target.categoryName,
-      amount: target.amount,
-      stampEarned: stampsToAward,
-      paymentMethod: settledMethod,
-      paymentStatus: 'paid',
-      settledAt: nowIso,
-      settledMethod,
-      status: 'confirmed',
-      description: `Pelunasan ${target.debtCode}${target.description ? ` · ${target.description}` : ''}`,
-      createdBy: 'Admin SCS',
-      createdAt: nowIso,
-    };
 
     const updatedDebt: CustomerDebt = {
       ...target,
       status: 'paid',
       settledAt: nowIso,
       settledMethod,
-      settledTransactionId: settledTrx.id,
     };
 
     const earnLedger: StampLedger | null =
@@ -647,7 +621,6 @@ export default function App() {
         ? {
             id: generateId('ldg'),
             customerId: target.customerId,
-            transactionId: settledTrx.id,
             type: 'earn',
             amount: stampsToAward,
             balanceAfter: newBal,
@@ -657,39 +630,14 @@ export default function App() {
           }
         : null;
 
-    let newCashEntry: CashBookEntry | null = null;
-    if (settledMethod === 'cash' && target.amount > 0) {
-      const bkuPrefix = `BKU-${dateCode}-`;
-      const maxBkuSeq = data.cashBook
-        .filter(e => e.entryCode.startsWith(bkuPrefix))
-        .reduce((max, e) => Math.max(max, parseInt(e.entryCode.replace(bkuPrefix, ''), 10) || 0), 0);
-      const bkuSeq = String(maxBkuSeq + 1).padStart(3, '0');
-      newCashEntry = {
-        id: generateId('bku'),
-        entryCode: `${bkuPrefix}${bkuSeq}`,
-        date: nowIso,
-        type: 'in',
-        category: 'Pelunasan Hutang',
-        description: `${target.customerName} · Pelunasan ${target.debtCode}`,
-        amount: target.amount,
-        sourceTransactionId: settledTrx.id,
-        createdBy: 'Admin SCS',
-        createdAt: nowIso,
-      };
-    }
-
     const nextDebts = data.debts.map(d => (d.id === debtId ? updatedDebt : d));
-    const nextTransactions = [settledTrx, ...data.transactions];
     const nextLedgers = earnLedger ? [earnLedger, ...data.ledgers] : data.ledgers;
-    const nextCashBook = newCashEntry ? [newCashEntry, ...data.cashBook] : data.cashBook;
 
     setData(prev => {
       const next = {
         ...prev,
         debts: nextDebts,
-        transactions: nextTransactions,
         ledgers: nextLedgers,
-        cashBook: nextCashBook,
       };
       saveAppData(next);
       return next;
@@ -701,15 +649,12 @@ export default function App() {
         target.debtCode,
         nowIso,
         settledMethod,
-        settledTrx.transactionCode
+        target.customerId,
+        newBal
       );
-      sendTransactionToGoogleSheets(data.settings.googleSheetsScriptUrl, settledTrx, newBal);
-      if (newCashEntry) {
-        sendCashEntryToGoogleSheets(data.settings.googleSheetsScriptUrl, newCashEntry);
-      }
     }
 
-    return { debt: updatedDebt, transaction: settledTrx, newBalance: newBal };
+    return { debt: updatedDebt, newBalance: newBal };
   };
 
   const handleCancelDebt = (debtId: string) => {
@@ -785,7 +730,7 @@ export default function App() {
     }
   };
 
-  // Transaction Cancellation (with stamp reversal & linked cash entry cleanup)
+  // Transaction Cancellation (with stamp reversal — Buku Kas is independent)
   const handleCancelTransaction = (transactionId: string, reason: string) => {
     const target = data.transactions.find(t => t.id === transactionId);
     if (!target || target.status === 'cancelled') return;
@@ -813,25 +758,16 @@ export default function App() {
       t.id === transactionId ? ({ ...t, status: 'cancelled' as const } as Transaction) : t
     );
     const updatedLedgers = reversalLedger ? [reversalLedger, ...data.ledgers] : data.ledgers;
-    const linkedCash = data.cashBook.filter(e => e.sourceTransactionId === transactionId);
-    const updatedCashBook = data.cashBook.filter(e => e.sourceTransactionId !== transactionId);
 
     setData(prev => {
       const next = {
         ...prev,
         transactions: updatedTransactions,
         ledgers: updatedLedgers,
-        cashBook: updatedCashBook,
       };
       saveAppData(next);
       return next;
     });
-
-    if (data.settings.googleSheetsScriptUrl && linkedCash.length > 0) {
-      linkedCash.forEach(entry => {
-        deleteCashEntryFromGoogleSheets(data.settings.googleSheetsScriptUrl, entry.entryCode);
-      });
-    }
   };
 
   // Redemption Handler (deducts 25 stamps, keeps surplus)
@@ -1117,7 +1053,6 @@ export default function App() {
         return (
           <BukuKasView
             entries={data.cashBook}
-            transactions={data.transactions}
             settings={data.settings}
             onAddEntry={handleAddCashEntry}
             onDeleteEntry={handleDeleteCashEntry}

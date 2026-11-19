@@ -274,7 +274,7 @@ export const TransactionModal: React.FC<Props> = ({
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs font-bold leading-tight">Cash (Tunai)</p>
-                  <p className="text-[10px] text-slate-500 truncate">Masuk Buku Kas</p>
+                  <p className="text-[10px] text-slate-500 truncate">Pembayaran tunai</p>
                 </div>
               </button>
 
@@ -292,7 +292,7 @@ export const TransactionModal: React.FC<Props> = ({
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs font-bold leading-tight">QRIS</p>
-                  <p className="text-[10px] text-slate-500 truncate">Non-tunai (lunas)</p>
+                  <p className="text-[10px] text-slate-500 truncate">Pembayaran non-tunai</p>
                 </div>
               </button>
             </div>

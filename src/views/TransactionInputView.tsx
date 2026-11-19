@@ -450,7 +450,7 @@ export const TransactionInputView: React.FC<Props> = ({
                   </div>
                   <div className="min-w-0">
                     <p className="text-xs font-bold leading-tight">Cash (Tunai)</p>
-                    <p className="text-[10px] text-slate-500 truncate mt-0.5">Masuk Buku Kas</p>
+                    <p className="text-[10px] text-slate-500 truncate mt-0.5">Pembayaran tunai</p>
                   </div>
                 </button>
 
@@ -468,7 +468,7 @@ export const TransactionInputView: React.FC<Props> = ({
                   </div>
                   <div className="min-w-0">
                     <p className="text-xs font-bold leading-tight">QRIS</p>
-                    <p className="text-[10px] text-slate-500 truncate mt-0.5">Tidak ke kas laci</p>
+                    <p className="text-[10px] text-slate-500 truncate mt-0.5">Pembayaran non-tunai</p>
                   </div>
                 </button>
               </div>

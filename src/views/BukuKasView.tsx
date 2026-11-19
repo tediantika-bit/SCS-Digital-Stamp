@@ -10,16 +10,15 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Wallet,
-  QrCode,
+  Scale,
   AlertTriangle,
   Calendar,
 } from 'lucide-react';
-import { CashBookEntry, CashBookEntryType, Transaction, StoreSettings } from '../types';
+import { CashBookEntry, CashBookEntryType, StoreSettings } from '../types';
 import { formatRupiah, formatDate } from '../utils/storage';
 
 interface Props {
   entries: CashBookEntry[];
-  transactions: Transaction[];
   settings: StoreSettings;
   onAddEntry: (input: {
     type: CashBookEntryType;
@@ -32,7 +31,8 @@ interface Props {
 }
 
 const IN_CATEGORIES = [
-  'Penjualan Tunai (Non-Stempel)',
+  'Setoran / Pemasukan Harian',
+  'Pelunasan Hutang Tunai',
   'Saldo Awal Laci',
   'Tambah Modal Tunai',
   'Pendapatan Lainnya',
@@ -57,7 +57,6 @@ function toLocalDateTimeInput(isoOrDate: Date | string): string {
 
 export const BukuKasView: React.FC<Props> = ({
   entries,
-  transactions,
   settings,
   onAddEntry,
   onDeleteEntry,
@@ -143,22 +142,7 @@ export const BukuKasView: React.FC<Props> = ({
     [periodEntries]
   );
 
-  const isQrisRevenue = (t: Transaction) =>
-    t.status === 'confirmed' &&
-    (t.paymentMethod === 'qris' ||
-      (t.paymentMethod === 'hutang' && t.paymentStatus === 'paid' && t.settledMethod === 'qris'));
-
-  const periodQrisTotal = useMemo(() => {
-    return transactions
-      .filter(t => isQrisRevenue(t) && matchesPeriod(t.settledAt || t.createdAt))
-      .reduce((s, t) => s + t.amount, 0);
-  }, [transactions, periodFilter, customDate, todayPrefix, monthPrefix]);
-
-  const periodQrisCount = useMemo(() => {
-    return transactions.filter(
-      t => isQrisRevenue(t) && matchesPeriod(t.settledAt || t.createdAt)
-    ).length;
-  }, [transactions, periodFilter, customDate, todayPrefix, monthPrefix]);
+  const periodNetCash = periodCashIn - periodCashOut;
 
   // 3. Apply Type & Search Filter + Display Sort Order
   const displayedEntries = useMemo(() => {
@@ -266,7 +250,7 @@ export const BukuKasView: React.FC<Props> = ({
             <span>Buku Kas Umum (BKU)</span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Catatan arus uang masuk &amp; keluar tunai laci {settings.storeName}
+            Pencatatan manual arus uang masuk &amp; keluar tunai {settings.storeName}
           </p>
         </div>
 
@@ -317,7 +301,7 @@ export const BukuKasView: React.FC<Props> = ({
             +{formatRupiah(periodCashIn)}
           </p>
           <span className="text-[11px] text-slate-500 mt-1 block">
-            Tunai masuk dari kasir &amp; manual
+            Total pemasukan tunai tercatat
           </span>
         </div>
 
@@ -331,21 +315,35 @@ export const BukuKasView: React.FC<Props> = ({
             -{formatRupiah(periodCashOut)}
           </p>
           <span className="text-[11px] text-slate-500 mt-1 block">
-            Belanja, isi saldo, atau tarik tunai
+            Belanja, isi saldo, atau pengeluaran operasional
           </span>
         </div>
 
-        {/* 4. Info QRIS (Terpisah dari Laci) */}
+        {/* 4. Selisih Arus Kas Periode */}
         <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
           <div className="flex items-center justify-between text-slate-500 mb-1.5">
-            <span className="text-[11px] font-bold uppercase tracking-wider">Omzet QRIS ({periodLabel})</span>
-            <QrCode className="w-4 h-4 text-blue-600 shrink-0" />
+            <span className="text-[11px] font-bold uppercase tracking-wider">Selisih Kas ({periodLabel})</span>
+            <Scale className="w-4 h-4 text-slate-500 shrink-0" />
           </div>
-          <p className="text-xl sm:text-2xl font-black text-blue-600 tabular-nums">
-            {formatRupiah(periodQrisTotal)}
+          <p
+            className={`text-xl sm:text-2xl font-black tabular-nums ${
+              periodNetCash > 0
+                ? 'text-emerald-600'
+                : periodNetCash < 0
+                ? 'text-rose-600'
+                : 'text-slate-900'
+            }`}
+          >
+            {periodNetCash > 0
+              ? `+${formatRupiah(periodNetCash)}`
+              : formatRupiah(periodNetCash)}
           </p>
           <span className="text-[11px] text-slate-500 mt-1 block">
-            {periodQrisCount} transaksi QRIS · Tidak masuk laci
+            {periodNetCash > 0
+              ? 'Surplus arus kas (Masuk > Keluar)'
+              : periodNetCash < 0
+              ? 'Defisit arus kas (Keluar > Masuk)'
+              : 'Arus kas masuk & keluar seimbang'}
           </span>
         </div>
       </div>
@@ -477,7 +475,7 @@ export const BukuKasView: React.FC<Props> = ({
                     </p>
                     <p className="text-[11px] text-slate-400 mt-1 max-w-md mx-auto">
                       {entries.length === 0
-                        ? 'Transaksi pelanggan dengan metode Cash otomatis masuk ke sini. Anda juga dapat mencatat Saldo Awal Laci atau pengeluaran operasional secara manual.'
+                        ? 'Catat Saldo Awal Laci, pemasukan tunai harian, maupun pengeluaran operasional toko secara manual di sini.'
                         : 'Coba ubah filter tanggal atau kata kunci pencarian.'}
                     </p>
                     {entries.length === 0 && (
@@ -520,12 +518,6 @@ export const BukuKasView: React.FC<Props> = ({
                         </span>
                         <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
                           <span>{entry.category}</span>
-                          {entry.sourceTransactionId && (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span className="text-teal-700 font-medium">Otomatis dari Kasir</span>
-                            </>
-                          )}
                         </div>
                       </td>
 

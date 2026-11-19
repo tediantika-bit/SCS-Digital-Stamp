@@ -470,10 +470,15 @@ function doPost(e) {
             sheetSettleDebt.getRange(dRow, 9).setValue("paid");
             sheetSettleDebt.getRange(dRow, 10).setValue(data.settledAt || new Date().toISOString());
             sheetSettleDebt.getRange(dRow, 11).setValue(data.settledMethod || "cash");
-            sheetSettleDebt.getRange(dRow, 12).setValue(data.settledTransactionCode || "");
+            if (data.settledTransactionCode) {
+              sheetSettleDebt.getRange(dRow, 12).setValue(data.settledTransactionCode);
+            }
             break;
           }
         }
+      }
+      if (data.customerId !== undefined && data.newBalance !== undefined) {
+        updateCustomerBalance(ss, data.customerId, data.newBalance);
       }
       return ContentService.createTextOutput(JSON.stringify({ success: true, action: action }))
         .setMimeType(ContentService.MimeType.JSON);

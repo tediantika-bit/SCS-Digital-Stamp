@@ -478,10 +478,15 @@ function doPost(e) {
             sheetSettleDebt.getRange(dRow, 9).setValue("paid");
             sheetSettleDebt.getRange(dRow, 10).setValue(data.settledAt || new Date().toISOString());
             sheetSettleDebt.getRange(dRow, 11).setValue(data.settledMethod || "cash");
-            sheetSettleDebt.getRange(dRow, 12).setValue(data.settledTransactionCode || "");
+            if (data.settledTransactionCode) {
+              sheetSettleDebt.getRange(dRow, 12).setValue(data.settledTransactionCode);
+            }
             break;
           }
         }
+      }
+      if (data.customerId !== undefined && data.newBalance !== undefined) {
+        updateCustomerBalance(ss, data.customerId, data.newBalance);
       }
       return ContentService.createTextOutput(JSON.stringify({ success: true, action: action }))
         .setMimeType(ContentService.MimeType.JSON);
@@ -1024,14 +1029,15 @@ export function sendDebtToGoogleSheets(
 }
 
 /**
- * Sends debt settlement status update to Google Sheets in the background
+ * Sends debt settlement status & updated stamp balance to Google Sheets in the background
  */
 export function sendDebtSettlementToGoogleSheets(
   scriptUrl: string | undefined,
   debtCode: string,
   settledAt: string,
   settledMethod: 'cash' | 'qris',
-  settledTransactionCode: string
+  customerId?: string,
+  newBalance?: number
 ): void {
   if (!scriptUrl || !debtCode) return;
 
@@ -1040,7 +1046,8 @@ export function sendDebtSettlementToGoogleSheets(
     debtCode,
     settledAt,
     settledMethod,
-    settledTransactionCode,
+    customerId,
+    newBalance,
   });
 }
 
@@ -1265,6 +1272,35 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
           description: `Stempel transaksi ${t.transactionCode}`,
           createdBy: 'Kasir SCS',
           createdAt: t.settledAt || t.createdAt,
+        });
+      });
+
+    debts
+      .filter(d => {
+        if (d.status !== 'paid' || !(d.pendingStamps > 0)) return false;
+        // Skip if an older version already created a linked confirmed transaction
+        if (
+          d.settledTransactionId &&
+          transactions.some(
+            t =>
+              t.status !== 'cancelled' &&
+              (t.id === d.settledTransactionId || t.transactionCode === d.settledTransactionId)
+          )
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .forEach(d => {
+        ledgers.push({
+          id: `ldg-htg-${d.debtCode}`,
+          customerId: d.customerId,
+          type: 'earn',
+          amount: d.pendingStamps,
+          balanceAfter: 0,
+          description: `Pelunasan hutang ${d.debtCode}`,
+          createdBy: 'Admin SCS',
+          createdAt: d.settledAt || d.createdAt,
         });
       });
 

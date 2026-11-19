@@ -159,6 +159,52 @@ Telp/WA: ${settings.storePhone}`;
 }
 
 /**
+ * Creates formatted WhatsApp receipt when a member debt is settled (independent from main transactions)
+ */
+export function createDebtSettledWAMessage(
+  customer: Customer,
+  debt: CustomerDebt,
+  newBalance: number,
+  settings: StoreSettings
+): string {
+  const targetStamps = settings.rewardRequiredStamps || 25;
+  const remaining = Math.max(0, targetStamps - newBalance);
+  const cardUrl = getCustomerCardUrl(customer.qrToken);
+  const stampsEarned = debt.pendingStamps || 0;
+  const payLabel = debt.settledMethod === 'qris' ? 'QRIS' : 'Cash (Tunai)';
+
+  const statusSection =
+    newBalance >= targetStamps
+      ? `🎉 *SELAMAT! KARTU STEMPEL ANDA SUDAH PENUH!*
+Saldo stempel Anda saat ini mencapai *${newBalance} stempel*.
+Anda berhak menukarkan *1 ${settings.defaultRewardName}* gratis di kasir ${settings.storeName}!`
+      : `✨ Kumpulkan *${remaining} stempel lagi* untuk mendapatkan hadiah: *${settings.defaultRewardName}*!`;
+
+  return `✅ *BUKTI PELUNASAN HUTANG - ${settings.storeName.toUpperCase()}*
+----------------------------------------
+Halo Kak *${customer.name}* (ID: ${customer.customerCode}),
+Terima kasih! Tagihan hutang Anda telah *LUNAS*:
+
+📋 *Rincian Pelunasan:*
+• Kode Hutang: ${debt.debtCode}
+• Layanan: ${debt.description || debt.categoryName || 'Transaksi Toko'}
+• Nominal Lunas: *${formatRupiah(debt.amount)}* (${payLabel})
+• Waktu Lunas: ${formatDate(debt.settledAt || new Date().toISOString())}
+
+⭐ *Stempel Cair:* *+${stampsEarned} Stempel*
+🎯 *Total Saldo Stempel:* *${newBalance} / ${targetStamps} Stempel*
+----------------------------------------
+${statusSection}
+
+Lihat kartu stempel digital Anda secara online:
+${cardUrl}
+
+📍 *${settings.storeName}*
+${settings.storeAddress}
+Telp/WA: ${settings.storePhone}`;
+}
+
+/**
  * Creates formatted WhatsApp reminder message for unpaid debt
  */
 export function createDebtReminderWAMessage(

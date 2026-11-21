@@ -130,16 +130,12 @@ export type DebtLike =
 export function createDebtCreatedWAMessage(
   customer: Customer,
   debt: CustomerDebt,
-  currentBalance: number,
   settings: StoreSettings
 ): string {
-  const targetStamps = settings.rewardRequiredStamps || 25;
-  const heldStamps = debt.pendingStamps ?? 0;
-
   return `🧾 *CATATAN HUTANG MEMBER - ${settings.storeName.toUpperCase()}*
 ----------------------------------------
 Halo Kak *${customer.name}* (ID: ${customer.customerCode}),
-Berikut rincian transaksi Anda yang tercatat di daftar *Hutang / Bayar Nanti*:
+Berikut rincian catatan Anda yang tercatat di daftar *Hutang / Bayar Nanti*:
 
 📋 *Rincian Catatan:*
 • Layanan: ${debt.description || debt.categoryName || 'Transaksi Toko'}
@@ -148,10 +144,8 @@ Berikut rincian transaksi Anda yang tercatat di daftar *Hutang / Bayar Nanti*:
 • Waktu: ${formatDate(debt.createdAt)}
 
 ⏳ *Status Pembayaran:* *BELUM LUNAS*
-⭐ *Stempel Tertahan:* *+${heldStamps} Stempel* (otomatis masuk setelah hutang dilunasi)
-🎯 *Saldo Stempel Aktif:* *${currentBalance} / ${targetStamps} Stempel*
 ----------------------------------------
-Terima kasih! Stempel akan langsung ditambahkan begitu pembayaran diselesaikan via Cash atau QRIS.
+Pembayaran dapat dilakukan secara tunai (Cash) di kasir atau via QRIS. Terima kasih!
 
 📍 *${settings.storeName}*
 ${settings.storeAddress}
@@ -159,26 +153,14 @@ Telp/WA: ${settings.storePhone}`;
 }
 
 /**
- * Creates formatted WhatsApp receipt when a member debt is settled (independent from main transactions)
+ * Creates formatted WhatsApp receipt when a member debt is settled (no stamps awarded)
  */
 export function createDebtSettledWAMessage(
   customer: Customer,
   debt: CustomerDebt,
-  newBalance: number,
   settings: StoreSettings
 ): string {
-  const targetStamps = settings.rewardRequiredStamps || 25;
-  const remaining = Math.max(0, targetStamps - newBalance);
-  const cardUrl = getCustomerCardUrl(customer.qrToken);
-  const stampsEarned = debt.pendingStamps || 0;
   const payLabel = debt.settledMethod === 'qris' ? 'QRIS' : 'Cash (Tunai)';
-
-  const statusSection =
-    newBalance >= targetStamps
-      ? `🎉 *SELAMAT! KARTU STEMPEL ANDA SUDAH PENUH!*
-Saldo stempel Anda saat ini mencapai *${newBalance} stempel*.
-Anda berhak menukarkan *1 ${settings.defaultRewardName}* gratis di kasir ${settings.storeName}!`
-      : `✨ Kumpulkan *${remaining} stempel lagi* untuk mendapatkan hadiah: *${settings.defaultRewardName}*!`;
 
   return `✅ *BUKTI PELUNASAN HUTANG - ${settings.storeName.toUpperCase()}*
 ----------------------------------------
@@ -191,13 +173,9 @@ Terima kasih! Tagihan hutang Anda telah *LUNAS*:
 • Nominal Lunas: *${formatRupiah(debt.amount)}* (${payLabel})
 • Waktu Lunas: ${formatDate(debt.settledAt || new Date().toISOString())}
 
-⭐ *Stempel Cair:* *+${stampsEarned} Stempel*
-🎯 *Total Saldo Stempel:* *${newBalance} / ${targetStamps} Stempel*
+✅ *Status Pembayaran:* *LUNAS*
 ----------------------------------------
-${statusSection}
-
-Lihat kartu stempel digital Anda secara online:
-${cardUrl}
+Terima kasih banyak atas kepercayaan Anda di ${settings.storeName}!
 
 📍 *${settings.storeName}*
 ${settings.storeAddress}
@@ -212,7 +190,6 @@ export function createDebtReminderWAMessage(
   debt: DebtLike,
   settings: StoreSettings
 ): string {
-  const heldStamps = debt.pendingStamps ?? 0;
   const code = 'debtCode' in debt && debt.debtCode ? debt.debtCode : ('transactionCode' in debt ? debt.transactionCode : '');
   return `📌 *PENGINGAT TAGIHAN - ${settings.storeName.toUpperCase()}*
 ----------------------------------------
@@ -223,7 +200,7 @@ Menginformasikan rincian tagihan yang belum diselesaikan di ${settings.storeName
 • Tanggal: ${formatDate(debt.createdAt)}
 • Layanan: ${debt.description || debt.categoryName || 'Transaksi Toko'}
 • Total Tagihan: *${formatRupiah(debt.amount)}*
-${heldStamps > 0 ? `• Stempel Tertahan: *+${heldStamps} stempel* (langsung masuk saat lunas)\n` : ''}
+
 Pembayaran dapat dilakukan secara tunai (Cash) di kasir atau via QRIS. Terima kasih!
 
 📍 *${settings.storeName}*
@@ -244,7 +221,6 @@ export function createConsolidatedDebtReminderWAMessage(
   }
 
   const totalAmount = unpaidDebts.reduce((sum, t) => sum + t.amount, 0);
-  const totalHeld = unpaidDebts.reduce((sum, t) => sum + (t.pendingStamps || 0), 0);
 
   const lines = unpaidDebts
     .map((t, idx) => {
@@ -263,7 +239,7 @@ ${lines}
 
 ----------------------------------------
 💰 *Total Tagihan:* *${formatRupiah(totalAmount)}*
-${totalHeld > 0 ? `⭐ *Stempel Tertahan:* *+${totalHeld} stempel* (otomatis masuk setelah lunas)\n` : ''}
+
 Pembayaran dapat dilakukan secara tunai (Cash) di kasir atau via QRIS. Terima kasih banyak!
 
 📍 *${settings.storeName}*

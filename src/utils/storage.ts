@@ -223,7 +223,7 @@ export function loadAppData(): AppData {
             categoryId: t.categoryId || 'cat-10',
             categoryName: t.categoryName || 'Transaksi Toko',
             amount: t.amount,
-            pendingStamps: t.pendingStamps || 0,
+            pendingStamps: 0,
             description: t.description || t.categoryName || 'Transaksi Toko',
             status: 'unpaid',
             createdBy: t.createdBy || 'Admin SCS',

@@ -258,7 +258,7 @@ export default function App() {
                   categoryId: t.categoryId || 'cat-10',
                   categoryName: t.categoryName || 'Transaksi Toko',
                   amount: t.amount,
-                  pendingStamps: t.pendingStamps || 0,
+                  pendingStamps: 0,
                   description: t.description || t.categoryName || 'Transaksi Toko',
                   status: 'unpaid',
                   createdBy: t.createdBy || 'Admin SCS',
@@ -321,34 +321,6 @@ export default function App() {
                 description: `Stempel transaksi ${t.transactionCode}`,
                 createdBy: t.createdBy || 'Admin SCS',
                 createdAt: t.settledAt || t.createdAt,
-              });
-            });
-
-          mergedDebts
-            .filter(d => {
-              if (d.status !== 'paid' || !(d.pendingStamps > 0)) return false;
-              if (
-                d.settledTransactionId &&
-                mergedTransactions.some(
-                  t =>
-                    t.status !== 'cancelled' &&
-                    (t.id === d.settledTransactionId || t.transactionCode === d.settledTransactionId)
-                )
-              ) {
-                return false;
-              }
-              return true;
-            })
-            .forEach(d => {
-              rebuiltLedgers.push({
-                id: `ldg-htg-${d.debtCode}`,
-                customerId: d.customerId,
-                type: 'earn',
-                amount: d.pendingStamps,
-                balanceAfter: 0,
-                description: `Pelunasan hutang ${d.debtCode}`,
-                createdBy: d.createdBy || 'Admin SCS',
-                createdAt: d.settledAt || d.createdAt,
               });
             });
 
@@ -550,14 +522,13 @@ export default function App() {
     return newTransaction;
   };
 
-  // Dedicated Member Debt Handlers (Catat Hutang, Pelunasan Lunas, Batal)
+  // Dedicated Member Debt Handlers (Catat Hutang, Pelunasan Lunas, Batal — tanpa stempel)
   const handleAddDebt = (input: {
     customerId: string;
     customerName: string;
     categoryId: string;
     categoryName: string;
     amount: number;
-    pendingStamps: number;
     description: string;
   }): CustomerDebt => {
     const nowIso = new Date().toISOString();
@@ -576,7 +547,7 @@ export default function App() {
       categoryId: input.categoryId,
       categoryName: input.categoryName,
       amount: input.amount,
-      pendingStamps: input.pendingStamps,
+      pendingStamps: 0,
       description: input.description,
       status: 'unpaid',
       createdBy: 'Admin SCS',
@@ -600,44 +571,26 @@ export default function App() {
   const handleSettleDebt = (
     debtId: string,
     settledMethod: 'cash' | 'qris'
-  ): { debt: CustomerDebt; newBalance: number } | undefined => {
+  ): CustomerDebt | undefined => {
     const target = data.debts.find(d => d.id === debtId && d.status === 'unpaid');
     if (!target) return undefined;
 
     const nowIso = new Date().toISOString();
-    const stampsToAward = target.pendingStamps || 0;
-    const curBal = getCustomerStampBalance(target.customerId, data.ledgers);
-    const newBal = curBal + stampsToAward;
 
     const updatedDebt: CustomerDebt = {
       ...target,
+      pendingStamps: 0,
       status: 'paid',
       settledAt: nowIso,
       settledMethod,
     };
 
-    const earnLedger: StampLedger | null =
-      stampsToAward > 0
-        ? {
-            id: generateId('ldg'),
-            customerId: target.customerId,
-            type: 'earn',
-            amount: stampsToAward,
-            balanceAfter: newBal,
-            description: `Pelunasan hutang ${target.debtCode}`,
-            createdBy: 'Admin SCS',
-            createdAt: nowIso,
-          }
-        : null;
-
     const nextDebts = data.debts.map(d => (d.id === debtId ? updatedDebt : d));
-    const nextLedgers = earnLedger ? [earnLedger, ...data.ledgers] : data.ledgers;
 
     setData(prev => {
       const next = {
         ...prev,
         debts: nextDebts,
-        ledgers: nextLedgers,
       };
       saveAppData(next);
       return next;
@@ -648,13 +601,11 @@ export default function App() {
         data.settings.googleSheetsScriptUrl,
         target.debtCode,
         nowIso,
-        settledMethod,
-        target.customerId,
-        newBal
+        settledMethod
       );
     }
 
-    return { debt: updatedDebt, newBalance: newBal };
+    return updatedDebt;
   };
 
   const handleCancelDebt = (debtId: string) => {
@@ -1028,7 +979,6 @@ export default function App() {
             debts={data.debts}
             customers={data.customers}
             categories={data.categories}
-            ledgers={data.ledgers}
             settings={data.settings}
             onAddDebt={handleAddDebt}
             onSettleDebt={handleSettleDebt}

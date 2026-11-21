@@ -5,28 +5,21 @@ import {
   Search,
   CheckCircle2,
   Ban,
-  Stamp,
+  Users,
   User,
   X,
   Banknote,
   QrCode,
   AlertTriangle,
   Receipt,
-  Sparkles,
 } from 'lucide-react';
 import {
   Customer,
   CustomerDebt,
-  StampLedger,
   StoreSettings,
   TransactionCategory,
 } from '../types';
-import {
-  calculateStampsFromAmount,
-  formatDate,
-  formatRupiah,
-  getCustomerStampBalance,
-} from '../utils/storage';
+import { formatDate, formatRupiah } from '../utils/storage';
 import {
   createConsolidatedDebtReminderWAMessage,
   createDebtCreatedWAMessage,
@@ -40,7 +33,6 @@ interface Props {
   debts: CustomerDebt[];
   customers: Customer[];
   categories: TransactionCategory[];
-  ledgers: StampLedger[];
   settings: StoreSettings;
   onAddDebt: (input: {
     customerId: string;
@@ -48,13 +40,12 @@ interface Props {
     categoryId: string;
     categoryName: string;
     amount: number;
-    pendingStamps: number;
     description: string;
   }) => CustomerDebt;
   onSettleDebt: (
     debtId: string,
     settledMethod: 'cash' | 'qris'
-  ) => { debt: CustomerDebt; newBalance: number } | undefined;
+  ) => CustomerDebt | undefined;
   onCancelDebt: (debtId: string) => void;
 }
 
@@ -62,7 +53,6 @@ export const HutangView: React.FC<Props> = ({
   debts,
   customers,
   categories,
-  ledgers,
   settings,
   onAddDebt,
   onSettleDebt,
@@ -145,10 +135,14 @@ export const HutangView: React.FC<Props> = ({
     [unpaidDebts]
   );
 
-  const totalHeldStamps = useMemo(
-    () => unpaidDebts.reduce((s, d) => s + (d.pendingStamps || 0), 0),
-    [unpaidDebts]
-  );
+  const uniqueUnpaidMemberCount = useMemo(() => {
+    const keys = new Set<string>();
+    unpaidDebts.forEach(d => {
+      const cust = findCustomer(d);
+      keys.add(cust.id || d.customerName);
+    });
+    return keys.size;
+  }, [unpaidDebts, customers]);
 
   const totalPaidAmount = useMemo(
     () => paidDebts.reduce((s, d) => s + d.amount, 0),
@@ -186,7 +180,6 @@ export const HutangView: React.FC<Props> = ({
         customer: Customer;
         debts: CustomerDebt[];
         totalAmount: number;
-        totalHeld: number;
       }
     >();
 
@@ -197,13 +190,11 @@ export const HutangView: React.FC<Props> = ({
       if (existing) {
         existing.debts.push(debt);
         existing.totalAmount += debt.amount;
-        existing.totalHeld += debt.pendingStamps || 0;
       } else {
         map.set(key, {
           customer: cust,
           debts: [debt],
           totalAmount: debt.amount,
-          totalHeld: debt.pendingStamps || 0,
         });
       }
     });
@@ -230,19 +221,7 @@ export const HutangView: React.FC<Props> = ({
   );
   const selectedCategory =
     activeCategories.find(c => c.id === selectedCategoryId) || activeCategories[0];
-  const isLainnya =
-    selectedCategory?.name?.toLowerCase().trim() === 'lainnya' ||
-    selectedCategory?.id === 'cat-10';
   const numericAmount = parseInt(rawAmount.replace(/\D/g, ''), 10) || 0;
-  const pendingStampsCalc = calculateStampsFromAmount(
-    numericAmount,
-    settings.stampThreshold,
-    selectedCategory?.name || selectedCategoryId
-  );
-  const memberCurrentBalance = selectedMember
-    ? getCustomerStampBalance(selectedMember.id, ledgers)
-    : 0;
-  const balanceIfSettled = memberCurrentBalance + pendingStampsCalc;
 
   const openAddModal = () => {
     const firstMember = activeMembers[0] || null;
@@ -289,7 +268,6 @@ export const HutangView: React.FC<Props> = ({
       categoryId: catId,
       categoryName: catName,
       amount: numericAmount,
-      pendingStamps: pendingStampsCalc,
       description: descText,
     });
 
@@ -297,7 +275,6 @@ export const HutangView: React.FC<Props> = ({
       const msg = createDebtCreatedWAMessage(
         selectedMember,
         createdDebt,
-        memberCurrentBalance,
         settings
       );
       sendWhatsAppMessage(selectedMember.phone, msg);
@@ -308,16 +285,11 @@ export const HutangView: React.FC<Props> = ({
 
   const handleConfirmSettle = () => {
     if (!settlingDebt) return;
-    const res = onSettleDebt(settlingDebt.id, settleMethod);
+    const settled = onSettleDebt(settlingDebt.id, settleMethod);
 
-    if (sendWAOnSettle && res) {
+    if (sendWAOnSettle && settled) {
       const cust = findCustomer(settlingDebt);
-      const msg = createDebtSettledWAMessage(
-        cust,
-        res.debt,
-        res.newBalance,
-        settings
-      );
+      const msg = createDebtSettledWAMessage(cust, settled, settings);
       sendWhatsAppMessage(cust.phone, msg);
     }
 
@@ -334,7 +306,7 @@ export const HutangView: React.FC<Props> = ({
             <span>Catatan Hutang Member</span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Khusus member terdaftar · Stempel tertahan otomatis masuk saat hutang dilunasi
+            Khusus member terdaftar · Pencatatan tagihan terpisah tanpa perolehan stempel
           </p>
         </div>
 
@@ -368,16 +340,16 @@ export const HutangView: React.FC<Props> = ({
         <div className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-xs">
           <div className="flex items-center justify-between text-slate-500 mb-1.5">
             <span className="text-[11px] font-bold uppercase tracking-wider">
-              Total Stempel Tertahan
+              Member Punya Hutang
             </span>
-            <Stamp className="w-4 h-4 text-orange-600 shrink-0" />
+            <Users className="w-4 h-4 text-slate-500 shrink-0" />
           </div>
-          <p className="text-xl sm:text-2xl font-black text-orange-600 tabular-nums">
-            +{totalHeldStamps}{' '}
-            <span className="text-xs font-normal text-slate-400">stempel</span>
+          <p className="text-xl sm:text-2xl font-black text-slate-900 tabular-nums">
+            {uniqueUnpaidMemberCount}{' '}
+            <span className="text-xs font-normal text-slate-400">member</span>
           </p>
           <span className="text-[11px] text-slate-500 mt-1 block">
-            Otomatis masuk ke kartu member saat lunas
+            Memiliki tagihan belum lunas · Tanpa stempel
           </span>
         </div>
 
@@ -479,14 +451,13 @@ export const HutangView: React.FC<Props> = ({
                     <th className="px-4 py-3">Member</th>
                     <th className="px-4 py-3">Daftar Nota</th>
                     <th className="px-4 py-3 text-right">Total Tagihan</th>
-                    <th className="px-4 py-3 text-center">Stempel Tertahan</th>
                     <th className="px-4 py-3 text-right">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {groupedUnpaidByCustomer.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-4 py-12 text-center text-slate-400">
+                      <td colSpan={4} className="px-4 py-12 text-center text-slate-400">
                         <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-300" />
                         <p className="font-semibold text-slate-700">
                           {unpaidDebts.length === 0
@@ -519,11 +490,6 @@ export const HutangView: React.FC<Props> = ({
                         </td>
                         <td className="px-4 py-3 text-right font-black text-amber-700 tabular-nums whitespace-nowrap">
                           {formatRupiah(group.totalAmount)}
-                        </td>
-                        <td className="px-4 py-3 text-center whitespace-nowrap">
-                          <span className="text-xs font-bold text-orange-600 tabular-nums">
-                            {group.totalHeld > 0 ? `+${group.totalHeld} tertahan` : '0'}
-                          </span>
                         </td>
                         <td className="px-4 py-3 text-right whitespace-nowrap">
                           <button
@@ -559,14 +525,13 @@ export const HutangView: React.FC<Props> = ({
                     <th className="px-4 py-3">Member</th>
                     <th className="px-4 py-3">Layanan &amp; Keterangan</th>
                     <th className="px-4 py-3 text-right">Nominal Tagihan</th>
-                    <th className="px-4 py-3 text-center">Stempel Tertahan</th>
                     <th className="px-4 py-3 text-right">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredUnpaid.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
+                      <td colSpan={5} className="px-4 py-12 text-center text-slate-400">
                         <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-300" />
                         <p className="font-semibold text-slate-700">
                           {unpaidDebts.length === 0
@@ -588,7 +553,6 @@ export const HutangView: React.FC<Props> = ({
                   ) : (
                     filteredUnpaid.map(debt => {
                       const cust = findCustomer(debt);
-                      const held = debt.pendingStamps || 0;
                       return (
                         <tr key={debt.id} className="hover:bg-slate-50/80 transition">
                           <td className="px-4 py-3 whitespace-nowrap">
@@ -615,11 +579,6 @@ export const HutangView: React.FC<Props> = ({
                           </td>
                           <td className="px-4 py-3 text-right font-black text-amber-700 tabular-nums whitespace-nowrap">
                             {formatRupiah(debt.amount)}
-                          </td>
-                          <td className="px-4 py-3 text-center whitespace-nowrap">
-                            <span className="text-xs font-bold text-orange-600 tabular-nums">
-                              {held > 0 ? `+${held} tertahan` : '0'}
-                            </span>
                           </td>
                           <td className="px-4 py-3 text-right whitespace-nowrap">
                             <div className="inline-flex items-center justify-end gap-1.5">
@@ -679,14 +638,13 @@ export const HutangView: React.FC<Props> = ({
                   <th className="px-4 py-3">Member</th>
                   <th className="px-4 py-3">Layanan &amp; Keterangan</th>
                   <th className="px-4 py-3 text-right">Nominal</th>
-                  <th className="px-4 py-3 text-center">Stempel</th>
                   <th className="px-4 py-3 text-center">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredHistory.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
+                    <td colSpan={5} className="px-4 py-12 text-center text-slate-400">
                       <Receipt className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                       <p className="font-semibold text-slate-700">
                         Belum ada riwayat hutang lunas atau dibatalkan
@@ -737,17 +695,6 @@ export const HutangView: React.FC<Props> = ({
                         </td>
                         <td className="px-4 py-3 text-center whitespace-nowrap">
                           {isPaid ? (
-                            <span className="text-xs font-bold text-orange-600 tabular-nums">
-                              +{debt.pendingStamps} masuk
-                            </span>
-                          ) : (
-                            <span className="text-xs text-slate-400 line-through tabular-nums">
-                              +{debt.pendingStamps}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-center whitespace-nowrap">
-                          {isPaid ? (
                             <span className="text-[11px] font-bold text-emerald-700 block">
                               Lunas
                               {debt.settledAt && (
@@ -787,7 +734,7 @@ export const HutangView: React.FC<Props> = ({
                     Catat Hutang Member Baru
                   </h3>
                   <p className="text-xs text-amber-100">
-                    Khusus member terdaftar · Stempel otomatis cair setelah lunas
+                    Khusus member terdaftar · Catatan hutang tidak memperoleh stempel
                   </p>
                 </div>
               </div>
@@ -842,7 +789,6 @@ export const HutangView: React.FC<Props> = ({
                     ) : (
                       filteredMembers.map(m => {
                         const isSel = m.id === selectedMemberId;
-                        const bal = getCustomerStampBalance(m.id, ledgers);
                         return (
                           <button
                             key={m.id}
@@ -867,9 +813,11 @@ export const HutangView: React.FC<Props> = ({
                                 {m.phone ? ` · ${m.phone}` : ''}
                               </p>
                             </div>
-                            <span className="text-[11px] font-bold text-slate-600 tabular-nums shrink-0">
-                              {bal} / {settings.rewardRequiredStamps || 25}
-                            </span>
+                            {isSel && (
+                              <span className="text-[11px] font-bold text-amber-700 shrink-0">
+                                Terpilih
+                              </span>
+                            )}
                           </button>
                         );
                       })
@@ -911,10 +859,8 @@ export const HutangView: React.FC<Props> = ({
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                       3. Nominal Hutang (Rp)
                     </label>
-                    <span className="text-[11px] font-semibold text-amber-700">
-                      {isLainnya
-                        ? `Kelipatan ${formatRupiah(settings.stampThreshold)} = 1 stempel`
-                        : `Min. ${formatRupiah(settings.stampThreshold)} = 1 stempel`}
+                    <span className="text-[11px] font-medium text-slate-500">
+                      Tanpa perolehan stempel
                     </span>
                   </div>
 
@@ -948,67 +894,6 @@ export const HutangView: React.FC<Props> = ({
                       </button>
                     ))}
                   </div>
-                </div>
-
-                {/* Real-time Stamp Preview */}
-                <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200">
-                  <div className="flex items-center justify-between text-xs text-slate-600 mb-2">
-                    <span className="font-semibold">Perolehan Stempel (Ditahan):</span>
-                    <span className="font-semibold text-[11px] text-amber-800">
-                      Masuk kartu setelah lunas
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 text-center pt-2 border-t border-amber-200/70">
-                    <div className="bg-white p-2 rounded-xl">
-                      <p className="text-[10px] text-slate-500 uppercase font-semibold">
-                        Stempel Lalu
-                      </p>
-                      <p className="text-base font-extrabold text-slate-700 tabular-nums">
-                        {memberCurrentBalance}
-                      </p>
-                    </div>
-
-                    <div className="bg-amber-600 text-white p-2 rounded-xl shadow-xs">
-                      <p className="text-[10px] text-amber-100 uppercase font-semibold">
-                        Stempel Tertahan
-                      </p>
-                      <p className="text-base font-black tabular-nums">
-                        +{pendingStampsCalc}
-                      </p>
-                    </div>
-
-                    <div className="bg-white p-2 rounded-xl">
-                      <p className="text-[10px] text-slate-500 uppercase font-semibold">
-                        Total Jika Lunas
-                      </p>
-                      <p
-                        className={`text-base font-extrabold tabular-nums ${
-                          balanceIfSettled >= (settings.rewardRequiredStamps || 25)
-                            ? 'text-emerald-600'
-                            : 'text-slate-800'
-                        }`}
-                      >
-                        {balanceIfSettled}
-                      </p>
-                    </div>
-                  </div>
-
-                  {numericAmount > 0 && pendingStampsCalc === 0 && (
-                    <p className="text-[11px] text-amber-800 mt-2 text-center font-medium">
-                      Nominal di bawah {formatRupiah(settings.stampThreshold)} tidak memperoleh stempel.
-                    </p>
-                  )}
-
-                  {pendingStampsCalc > 0 &&
-                    balanceIfSettled >= (settings.rewardRequiredStamps || 25) && (
-                      <div className="mt-2.5 p-2 rounded-xl bg-emerald-100/80 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center justify-center gap-1.5">
-                        <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>
-                          Saat dilunasi, member langsung berhak klaim {settings.defaultRewardName}!
-                        </span>
-                      </div>
-                    )}
                 </div>
 
                 {/* Keterangan */}
@@ -1103,10 +988,10 @@ export const HutangView: React.FC<Props> = ({
                 </div>
                 <div className="text-right">
                   <p className="text-[11px] font-semibold text-slate-500 uppercase">
-                    Stempel Cair
+                    Status Pelunasan
                   </p>
-                  <p className="text-lg font-black text-orange-600 tabular-nums mt-0.5">
-                    +{settlingDebt.pendingStamps || 0}
+                  <p className="text-xs font-bold text-slate-700 mt-1">
+                    Sekali bayar lunas · Tanpa stempel
                   </p>
                 </div>
               </div>
@@ -1218,8 +1103,8 @@ export const HutangView: React.FC<Props> = ({
 
             <p className="text-xs text-slate-600 leading-relaxed">
               Catatan hutang milik <strong>{cancellingDebt.customerName}</strong> sebesar{' '}
-              <strong>{formatRupiah(cancellingDebt.amount)}</strong> akan ditandai batal. Saldo
-              stempel member tidak berubah karena stempel masih tertahan.
+              <strong>{formatRupiah(cancellingDebt.amount)}</strong> akan ditandai batal dan
+              dipindahkan ke riwayat.
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-2">

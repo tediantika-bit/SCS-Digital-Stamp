@@ -485,9 +485,6 @@ function doPost(e) {
           }
         }
       }
-      if (data.customerId !== undefined && data.newBalance !== undefined) {
-        updateCustomerBalance(ss, data.customerId, data.newBalance);
-      }
       return ContentService.createTextOutput(JSON.stringify({ success: true, action: action }))
         .setMimeType(ContentService.MimeType.JSON);
     }
@@ -1029,15 +1026,13 @@ export function sendDebtToGoogleSheets(
 }
 
 /**
- * Sends debt settlement status & updated stamp balance to Google Sheets in the background
+ * Sends debt settlement status update to Google Sheets in the background (no stamp balance change)
  */
 export function sendDebtSettlementToGoogleSheets(
   scriptUrl: string | undefined,
   debtCode: string,
   settledAt: string,
-  settledMethod: 'cash' | 'qris',
-  customerId?: string,
-  newBalance?: number
+  settledMethod: 'cash' | 'qris'
 ): void {
   if (!scriptUrl || !debtCode) return;
 
@@ -1046,8 +1041,6 @@ export function sendDebtSettlementToGoogleSheets(
     debtCode,
     settledAt,
     settledMethod,
-    customerId,
-    newBalance,
   });
 }
 
@@ -1229,7 +1222,7 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
             categoryId: t.categoryId || 'cat-10',
             categoryName: t.categoryName || 'Transaksi Toko',
             amount: t.amount,
-            pendingStamps: t.pendingStamps || 0,
+            pendingStamps: 0,
             description: t.description || t.categoryName || 'Transaksi Toko',
             status: 'unpaid',
             createdBy: t.createdBy || 'Admin SCS',
@@ -1257,7 +1250,7 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
       };
     });
 
-    // Reconstruct ledger entries with running balance
+    // Reconstruct ledger entries with running balance (from confirmed main transactions & redemptions only)
     const ledgers: StampLedger[] = [];
     transactions
       .filter(t => t.status !== 'cancelled' && t.stampEarned > 0)
@@ -1272,35 +1265,6 @@ export async function fetchDataFromGoogleSheets(scriptUrl: string): Promise<{
           description: `Stempel transaksi ${t.transactionCode}`,
           createdBy: 'Kasir SCS',
           createdAt: t.settledAt || t.createdAt,
-        });
-      });
-
-    debts
-      .filter(d => {
-        if (d.status !== 'paid' || !(d.pendingStamps > 0)) return false;
-        // Skip if an older version already created a linked confirmed transaction
-        if (
-          d.settledTransactionId &&
-          transactions.some(
-            t =>
-              t.status !== 'cancelled' &&
-              (t.id === d.settledTransactionId || t.transactionCode === d.settledTransactionId)
-          )
-        ) {
-          return false;
-        }
-        return true;
-      })
-      .forEach(d => {
-        ledgers.push({
-          id: `ldg-htg-${d.debtCode}`,
-          customerId: d.customerId,
-          type: 'earn',
-          amount: d.pendingStamps,
-          balanceAfter: 0,
-          description: `Pelunasan hutang ${d.debtCode}`,
-          createdBy: 'Admin SCS',
-          createdAt: d.settledAt || d.createdAt,
         });
       });
 

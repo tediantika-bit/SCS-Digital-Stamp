@@ -477,9 +477,6 @@ function doPost(e) {
           }
         }
       }
-      if (data.customerId !== undefined && data.newBalance !== undefined) {
-        updateCustomerBalance(ss, data.customerId, data.newBalance);
-      }
       return ContentService.createTextOutput(JSON.stringify({ success: true, action: action }))
         .setMimeType(ContentService.MimeType.JSON);
     }
